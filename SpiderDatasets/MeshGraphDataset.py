@@ -1,16 +1,14 @@
 import warnings
 import random
 
-from sklearn.model_selection import train_test_split
 from dgl.data import DGLDataset
 import os
 import pickle as pkl
 import numpy as np
 import torch
-from sklearn.preprocessing import MinMaxScaler, MaxAbsScaler, StandardScaler
+from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
 
-from SHREC_Utils import subdivide_for_mesh
 from SpiderPatch.MeshGraph import MeshGraph
 
 

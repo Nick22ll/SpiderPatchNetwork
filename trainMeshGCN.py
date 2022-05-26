@@ -42,11 +42,11 @@ def main():
     ###### TRAIN DI UN MODELLO SU 4 RISOLUZIONI DI UN DATASET  #########
     for level in ["level_0"]:  #"all",,"level_1", "level_2", "level_3"
         dataset = MeshGraphDatasetForNNTraining()
-        dataset.load(f"Datasets/Prova/SHREC17_R10_RI6_P6_PATCH10_SAMPLE10/SHREC17_R10_RI6_P6_PATCH10_SAMPLE10_{level}_Normalized", f"SHREC17_R10_RI6_P6_PATCH10_SAMPLE10_{level}")
+        dataset.load(f"Datasets/Prova/SHREC17_R7_RI4_P8_PATCH10_SAMPLE5/SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}_Normalized", f"SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}")
         dataset.train_dataset.graphs[0].draw()
         dataset.to(device)
         model = MeshNetwork().to(device)
-        trainMeshNetwork(model, dataset, device, 50, f"SHREC17_R10_RI6_P6_PATCH10_SAMPLE10_{level}_prova")
+        trainMeshNetwork(model, dataset, device, 50, f"SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}")
 
     # for level in ["level_0", "level_1", "level_2", "level_3"]:  #"all",
     #     dataset = MeshGraphDatasetForNNTraining()
@@ -68,7 +68,7 @@ def trainMeshNetwork(model, dataset, device, epochs=1000, train_name=""):
     best_acc = 0
     best_loss = 1000
     dataloader = GraphDataLoader(dataset.train_dataset, batch_size=1, drop_last=False)
-    opt = torch.optim.Adam(model.mesh_reader.parameters(), lr=0.01)
+    opt = torch.optim.Adam(model.parameters(), lr=0.001)
     start = time()
     train_losses = []
     val_accuracies = []
@@ -77,21 +77,14 @@ def trainMeshNetwork(model, dataset, device, epochs=1000, train_name=""):
         sampler = 0
         train_losses.append(0)
         for graph, label in tqdm(dataloader, position=0, leave=False, desc=f"Epoch {epoch + 1}: ", colour="white", ncols=80):
+            opt.zero_grad()
             pred, embedding = model(graph, dataset.train_dataset.graphs[sampler].patches, device)
-            sampler += 1
             loss_running = F.cross_entropy(pred, label)
             train_losses[-1] += loss_running.item()
-            opt.zero_grad()
-            a = list(model.parameters())[0].clone()
             loss_running.backward()
-            if (sampler % 500) == 0:
-                plot_grad_flow(model.named_parameters())
             opt.step()
-            b = list(model.parameters())[0].clone()
-            print(torch.equal(a.data, b.data))
-        # if epoch > 0:
-        #     print_weights_difference(model, precedent_weights)
-        # precedent_weights = model.named_parameters()
+            sampler += 1
+
         train_losses[-1] /= len(dataset.train_dataset.graphs)
         print(f"Epoch {epoch + 1}/{epochs} ({int(time() - start)}s):"
               f" Epoch Loss={train_losses[-1]:.3f}")
@@ -128,55 +121,6 @@ def testMeshNetwork(model, dataset, device):
         loss_predicted = torch.vstack((loss_predicted, pred))
     model.train()
     return compute_scores(dataset, correct_prediction_number, loss_predicted)
-
-
-def trainSimilGAN(model, dataset, device, epochs=1000, train_name=""):
-    best_acc = 0
-    best_loss = 1000
-    dataloader = GraphDataLoader(dataset.train_dataset, batch_size=1, drop_last=False)
-    loss_patch, loss_mesh = [], []
-    start = time()
-    for epoch in range(epochs):
-        sampler = 0
-        loss_p_running, loss_m_running = 0, 0
-        for graph, label in tqdm(dataloader, position=0, leave=False, desc=f"Epoch {epoch}: ", colour="white", ncols=80):
-            loss_p, loss_m = model.train_step(graph, dataset.train_dataset.graphs[sampler].patches, label, device)
-            sampler += 1
-            loss_p_running += loss_p
-            loss_m_running += loss_m
-        loss_patch.append(loss_p_running / len(dataset.train_dataset.graphs))
-        loss_mesh.append(loss_m_running / len(dataset.train_dataset.graphs))
-        print(f"Epoch {epoch + 1}/{epochs} ({int(time() - start)}s):"
-              f" Patch Loss={loss_patch[-1]:.3f},"
-              f" Mesh Loss={loss_mesh[-1]:.3f},")
-        acc, loss, cm = testSimilGAN(model, dataset.validation_dataset)
-        print(f"Validation Test\n"
-              f"Acc. : {acc}\n"
-              f"Loss.: {loss}")
-        if acc > best_acc:
-            best_acc = acc
-            model.save(f"TrainedModels/Train_{train_name}/MeshNetworkBestAcc")
-            save_confusion_matrix(cm, f"TrainedModels/Train_{train_name}/MeshNetworkBestAcc/ConfusionMatrix.png")
-
-        if loss < best_loss:
-            best_loss = loss
-            model.save(f"TrainedModels/Train_{train_name}/MeshNetworkBestLoss")
-            save_confusion_matrix(cm, f"TrainedModels/Train_{train_name}/MeshNetworkBestLoss/ConfusionMatrix.png")
-            # model.save("TrainedModels/SimilGAN") #TODO toglilo
-
-
-def testSimilGAN(model, dataset):
-    correct_prediction_number = torch.empty(0, device=model.device)
-    loss_predicted = torch.empty(size=(0, dataset.numClasses()), device=model.device)
-    dataloader = GraphDataLoader(dataset, batch_size=1, drop_last=False)
-    sampler = 0
-    for graph, label in dataloader:
-        pred = model.evaluate(graph, dataset.graphs[sampler].patches)
-        sampler += 1
-        correct_prediction_number = torch.hstack((correct_prediction_number, pred.argmax(dim=1)))  # Take the highest value in the predicted classes vector
-        loss_predicted = torch.vstack((loss_predicted, pred))
-    return compute_scores(dataset, correct_prediction_number, loss_predicted)
-
 
 def compute_scores(dataset, pred_labels, loss_predicted):
     # Computation of accuracy metrics
