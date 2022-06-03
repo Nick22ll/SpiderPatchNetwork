@@ -1,4 +1,5 @@
-from SpiderDatasets.MeshGraphDataset import MeshGraphDataset, MeshGraphDatasetForNNTraining
+from SpiderDatasets.MeshGraphDataset import MeshGraphDataset
+from SpiderDatasets.MeshGraphForTrainingDataset import MeshGraphDatasetForNNTraining
 from SpiderPatch.PatchDatasetGenerator import *
 
 
@@ -21,16 +22,18 @@ def generateMeshGraphDatasetForNNTraining(mesh_dataset_path):
 
 
 def main():
-    # generatePatchDataset(start_idx=121)
-    for level in ["level_0", "all", "level_1", "level_2", "level_3"]:  #
-        generateMeshGraphDatasetFromPatches("Datasets/Patches/SHREC17_R5_RI4_P6", 5, 15, level, f"SHREC17_R5_RI4_P6_PATCH15_SAMPLE5_{level}")
-        generateMeshGraphDatasetFromPatches("Datasets/Patches/SHREC17_R7_RI4_P8", 5, 10, level, f"SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}")
-        generateMeshGraphDatasetFromPatches("Datasets/Patches/SHREC17_R10_RI6_P6", 5, 5, level, f"SHREC17_R10_RI6_P6_PATCH5_SAMPLE5_{level}")
+    # generatePatchDataset(start_idx=144)
+    for level in ["all"]:  # "level_0", "level_1", "level_2", "level_3"
+        # generateMeshGraphDatasetFromPatches("Datasets/Patches/SHREC17_R5_RI4_P6", 50, 50, level, f"SHREC17_R5_RI4_P6_PATCH50_SAMPLE50_{level}")
+        # generateMeshGraphDatasetFromPatches("Datasets/Patches/SHREC17_R7_RI4_P8", 50, 40, level, f"SHREC17_R7_RI4_P8_PATCH40_SAMPLE50_{level}")
+        generateMeshGraphDatasetFromPatches("Datasets/Patches/SHREC17_R10_RI6_P6", 50, 30, level, f"SHREC17_R10_RI6_P6_PATCH30_SAMPLE50_{level}")
+        # generateMeshGraphDatasetFromPatches("Datasets/Patches/SHREC17_R10_RI6_P6", 20, 5, level, f"SHREC17_R10_RI6_P6_PATCH5_SAMPLE20_{level}")
 
-    for level in ["level_0"]:  # , "all", "level_1", "level_2", "level_3"
-        generateMeshGraphDatasetForNNTraining(f"Datasets/MeshGraphs/SHREC17_R5_RI4_P6_PATCH15_SAMPLE5_{level}")
-        generateMeshGraphDatasetForNNTraining(f"Datasets/MeshGraphs/SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}")
-        generateMeshGraphDatasetForNNTraining(f"Datasets/MeshGraphs/SHREC17_R10_RI6_P6_PATCH5_SAMPLE5_{level}")
+    for level in ["all"]:  # "level_0", , "level_1", "level_2", "level_3"
+        # generateMeshGraphDatasetForNNTraining(f"Datasets/MeshGraphs/SHREC17_R5_RI4_P6_PATCH50_SAMPLE50_{level}")
+        # generateMeshGraphDatasetForNNTraining(f"Datasets/MeshGraphs/SHREC17_R7_RI4_P8_PATCH40_SAMPLE50_{level}")
+        generateMeshGraphDatasetForNNTraining(f"Datasets/MeshGraphs/SHREC17_R10_RI6_P6_PATCH30_SAMPLE50_{level}")
+        # generateMeshGraphDatasetForNNTraining(f"Datasets/MeshGraphs/SHREC17_R10_RI6_P6_PATCH5_SAMPLE20_{level}")
 
 
 if __name__ == "__main__":

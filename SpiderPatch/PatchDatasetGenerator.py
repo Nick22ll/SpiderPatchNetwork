@@ -15,7 +15,7 @@ DATASETS = {
 }
 
 
-def generatePatchDataset(mesh_dataset="SHREC17", save_path="", configurations=None, to_extract="all", patch_per_mesh=50, start_idx=None, stop_idx=None):
+def generatePatchDataset(mesh_dataset="SHREC17", save_path="", configurations=None, to_extract="all", patch_per_mesh=200, start_idx=None, stop_idx=None):
     """
 
     :param mesh_dataset:

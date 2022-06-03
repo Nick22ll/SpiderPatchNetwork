@@ -1,16 +1,16 @@
-
 import warnings
 from time import time
 
-
-from PlotUtils import plot_confusion_matrix, save_confusion_matrix, plot_training_statistics, plot_embeddings, plot_embeddings_space, plot_model_parameters_comparison, plot_grad_flow, print_weights, print_weights_difference
+from PlotUtils import plot_confusion_matrix, save_confusion_matrix, plot_training_statistics, plot_embeddings, plot_embeddings_space, plot_model_parameters_comparison, plot_grad_flow, print_weights, print_weights_difference, plot_embeddings_v2
 from sklearn import metrics
+import torch.nn.functional as F
+from SpiderDatasets.MeshGraphForTrainingDataset import MeshGraphDatasetForNNTraining
 from SpiderPatch.Networks import *
 
 from tqdm import tqdm, trange
 from dgl.dataloading import GraphDataLoader
 
-from SpiderDatasets.MeshGraphDataset import MeshGraphDatasetForNNTraining, MeshGraphDataset
+from SpiderDatasets.MeshGraphDataset import MeshGraphDataset
 
 
 def main():
@@ -37,16 +37,25 @@ def main():
     #     print(f"Acc: {acc}, Loss: {loss}")
     #     plot_confusion_matrix(cm)
 
-
-
     ###### TRAIN DI UN MODELLO SU 4 RISOLUZIONI DI UN DATASET  #########
-    for level in ["level_0"]:  #"all",,"level_1", "level_2", "level_3"
+    for level in ["all"]:  # ,"level_1", "level_2", "level_3","level_0"
         dataset = MeshGraphDatasetForNNTraining()
-        dataset.load(f"Datasets/Prova/SHREC17_R7_RI4_P8_PATCH10_SAMPLE5/SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}_Normalized", f"SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}")
+        # dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R7_RI4_P8_PATCH10_SAMPLE5/SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}_Normalized", f"SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}")
+        # dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R5_RI4_P6_PATCH15_SAMPLE20/SHREC17_R5_RI4_P6_PATCH15_SAMPLE20_{level}_Normalized", f"SHREC17_R5_RI4_P6_PATCH15_SAMPLE20_{level}")
+        dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R10_RI6_P6_PATCH5_SAMPLE20/SHREC17_R10_RI6_P6_PATCH5_SAMPLE20_{level}_Normalized", f"SHREC17_R10_RI6_P6_PATCH5_SAMPLE20_{level}")
         dataset.train_dataset.graphs[0].draw()
         dataset.to(device)
+
+        test_dataset = MeshGraphDatasetForNNTraining()
+        # dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R7_RI4_P8_PATCH10_SAMPLE5/SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}_Normalized", f"SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}")
+        # dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R5_RI4_P6_PATCH15_SAMPLE20/SHREC17_R5_RI4_P6_PATCH15_SAMPLE20_{level}_Normalized", f"SHREC17_R5_RI4_P6_PATCH15_SAMPLE20_{level}")
+        test_dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R10_RI6_P6_PATCH5_SAMPLE20/SHREC17_R10_RI6_P6_PATCH5_SAMPLE20_level_0_Normalized", f"SHREC17_R10_RI6_P6_PATCH5_SAMPLE20_level_0")
+        test_dataset.to(device)
         model = MeshNetwork().to(device)
-        trainMeshNetwork(model, dataset, device, 50, f"SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}")
+        model.load("TrainedModels/Train_SHREC17_R10_RI6_P6_PATCH5_SAMPLE20_all/MeshNetworkBestLoss/network.pt")
+        # trainMeshNetwork(model, dataset, device, 150, f"SHREC17_R7_RI4_P8_PATCH10_SAMPLE5_{level}")
+        # trainMeshNetwork(model, dataset, device, 150, f"SHREC17_R5_RI4_P6_PATCH15_SAMPLE20_{level}")
+        trainMeshNetwork(model, dataset, device, 150, f"SHREC17_R10_RI6_P6_PATCH5_SAMPLE20_{level}", test_dataset.validation_dataset)
 
     # for level in ["level_0", "level_1", "level_2", "level_3"]:  #"all",
     #     dataset = MeshGraphDatasetForNNTraining()
@@ -63,12 +72,12 @@ def main():
     #     trainMeshNetwork(model, dataset, device, 50, f"SHREC17_R5_RI4_P6_PATCH10_{level}")
 
 
-def trainMeshNetwork(model, dataset, device, epochs=1000, train_name=""):
+def trainMeshNetwork(model, dataset, device, epochs=1000, train_name="", test_dataset=None):
     model.train()
     best_acc = 0
     best_loss = 1000
     dataloader = GraphDataLoader(dataset.train_dataset, batch_size=1, drop_last=False)
-    opt = torch.optim.Adam(model.parameters(), lr=0.001)
+    opt = torch.optim.Adam(model.parameters(), lr=10e-5, weight_decay=10e-4)
     start = time()
     train_losses = []
     val_accuracies = []
@@ -84,12 +93,16 @@ def trainMeshNetwork(model, dataset, device, epochs=1000, train_name=""):
             loss_running.backward()
             opt.step()
             sampler += 1
-
+        if epoch % 10 == 0:
+            plot_embeddings(model, dataset.train_dataset, device)
         train_losses[-1] /= len(dataset.train_dataset.graphs)
         print(f"Epoch {epoch + 1}/{epochs} ({int(time() - start)}s):"
               f" Epoch Loss={train_losses[-1]:.3f}")
 
-        acc, loss, cm = testMeshNetwork(model=model, dataset=dataset.validation_dataset, device=device)
+        if test_dataset is None:
+            acc, loss, cm = testMeshNetwork(model=model, dataset=dataset.validation_dataset, device=device)
+        else:
+            acc, loss, cm = testMeshNetwork(model=model, dataset=test_dataset, device=device)
         val_accuracies.append(acc)
         val_losses.append(loss)
         print(f"Validation Test\n"
@@ -99,12 +112,12 @@ def trainMeshNetwork(model, dataset, device, epochs=1000, train_name=""):
         if acc > best_acc:
             best_acc = acc
             model.save(f"TrainedModels/Train_{train_name}/MeshNetworkBestAcc")
-            save_confusion_matrix(cm, f"TrainedModels/Train_{train_name}/MeshNetworkBestAcc/ConfusionMatrixEpoch{epoch+1}.png")
+            save_confusion_matrix(cm, f"TrainedModels/Train_{train_name}/MeshNetworkBestAcc/ConfusionMatrixEpoch{epoch + 1}.png")
 
         if loss < best_loss:
             best_loss = loss
             model.save(f"TrainedModels/Train_{train_name}/MeshNetworkBestLoss")
-            save_confusion_matrix(cm, f"TrainedModels/Train_{train_name}/MeshNetworkBestLoss/ConfusionMatrixEpoch{epoch+1}.png")
+            save_confusion_matrix(cm, f"TrainedModels/Train_{train_name}/MeshNetworkBestLoss/ConfusionMatrixEpoch{epoch + 1}.png")
         plot_training_statistics(f"TrainedModels/Train_{train_name}/Train_{train_name}_statistics.png", title=f"Best Acc: {best_acc}, Loss: {best_loss}", epochs=range(epoch + 1), losses=train_losses, val_accuracies=val_accuracies, val_losses=val_losses)
 
 
@@ -122,6 +135,7 @@ def testMeshNetwork(model, dataset, device):
     model.train()
     return compute_scores(dataset, correct_prediction_number, loss_predicted)
 
+
 def compute_scores(dataset, pred_labels, loss_predicted):
     # Computation of accuracy metrics
     accuracy = pred_labels.eq(dataset.labels).sum().item() / len(dataset.graphs)
@@ -131,8 +145,6 @@ def compute_scores(dataset, pred_labels, loss_predicted):
     final_labels = torch.tensor(dataset.labels.tolist(), dtype=torch.int64, device=loss_predicted.device)
     loss = F.cross_entropy(loss_predicted, final_labels)
     return accuracy, loss.item(), confusion_matrix
-
-
 
 
 if __name__ == "__main__":

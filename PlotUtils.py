@@ -10,7 +10,7 @@ from dgl.dataloading import GraphDataLoader
 from matplotlib.lines import Line2D
 from sklearn.manifold import TSNE
 
-from SpiderDatasets.MeshGraphDataset import MeshGraphDatasetForNNTraining
+from SpiderDatasets.MeshGraphForTrainingDataset import MeshGraphDatasetForNNTraining
 from SpiderPatch.Networks import MeshNetwork
 
 
@@ -274,6 +274,46 @@ def plot_embeddings(model, dataset, device, filename=None):
     for c in np.unique(embeddings_labels):
         ax.scatter(embeddings[embeddings_labels == c, 0], embeddings[embeddings_labels == c, 1], label=c, color=palette[c])
     ax.legend(title="Classes")
+    if filename is None:
+        plt.show()
+    else:
+        plt.savefig(filename)
+
+    fig = plt.figure()
+    axes = fig.subplots(5, 3, sharex="none", sharey="none")
+    flat_axes = axes.flat
+    for i, c in enumerate(np.unique(embeddings_labels)):
+        flat_axes[i].scatter(embeddings[embeddings_labels == c, 0], embeddings[embeddings_labels == c, 1], label=c, color=palette[c])
+    # ax.legend(title="Classes")
+    if filename is None:
+        plt.show()
+    else:
+        plt.savefig(filename)
+
+
+def plot_embeddings_v2(model, dataset, device, filename=None):
+    embeddings = torch.empty((0, model.readout_dim), device=device)
+    embeddings_labels = np.empty(0, dtype=np.int32)
+
+    dataloader = GraphDataLoader(dataset, batch_size=1, drop_last=False)
+
+    sampler = 0
+    for graph, label in dataloader:
+        tmp = model(graph, dataset.graphs[sampler].patches, device)[1]
+        embeddings = torch.vstack((embeddings, tmp))
+        embeddings_labels = np.hstack((embeddings_labels, np.tile(label.detach().cpu().numpy(), tmp.shape[0])))
+        sampler += 1
+
+    embeddings = embeddings.detach().cpu().numpy()
+    embeddings = TSNE(n_components=2, learning_rate='auto', init='random').fit_transform(embeddings)
+
+    palette = np.array(sns.color_palette("hls", len(np.unique(embeddings_labels))))
+    fig = plt.figure()
+    axes = fig.subplots(5, 3, sharex="none", sharey="none")
+    flat_axes = axes.flat
+    for i, c in enumerate(np.unique(embeddings_labels)):
+        flat_axes[i].scatter(embeddings[embeddings_labels == c, 0], embeddings[embeddings_labels == c, 1], label=c, color=palette[c])
+    # ax.legend(title="Classes")
     if filename is None:
         plt.show()
     else:

@@ -1,7 +1,6 @@
 import warnings
 from copy import deepcopy
 
-
 import torch
 
 from scipy.spatial import KDTree
@@ -12,8 +11,13 @@ import numpy as np
 
 
 class MeshGraph(dgl.DGLGraph):
-    def __init__(self, patches, feats_names="all"):
+    def __init__(self, patches, feats_names="all", neighbours_number=0):
+        """
 
+        @param patches: a list of Patch representing nodes of the MeshGraph
+        @param feats_names: list of names of features to extract from patches
+        @param neighbours_number: number of Patches to consider neighbours (to generate the MeshGraph edges), leave "0" to make a fully connected graph
+        """
         if feats_names == "all":
             feats_names = patches[0].getNodeFeatsNames()
 
@@ -45,12 +49,17 @@ class MeshGraph(dgl.DGLGraph):
                 self.patches.append(deepcopy(patch))
             seed_points = np.vstack((seed_points, patch.seed_point))
 
-        # Calculate the MeshGraphs edges (5 NearestNeighbours)
-        neighbour_points = 6  # int(len(patches)/2) # metto 6 perchè considero anche la distanza tra lo stesso punto quindi è ovvio che mi venga ritornato il punto stesso
-        kdtree = KDTree(seed_points)
-        _, points_idx = kdtree.query(seed_points, neighbour_points)
-        start_nodes = np.hstack((start_nodes, [val for val in range(points_idx.shape[0]) for _ in range(neighbour_points - 1)]))
-        end_nodes = np.hstack((end_nodes, points_idx[:, 1:].flatten()))
+        # Calculate the MeshGraphs edges
+        if neighbours_number > 0:
+            neighbour_points = neighbours_number + 1
+            kdtree = KDTree(seed_points)
+            _, points_idx = kdtree.query(seed_points, neighbour_points)
+            start_nodes = np.hstack((start_nodes, [val for val in range(points_idx.shape[0]) for _ in range(neighbour_points - 1)]))
+            end_nodes = np.hstack((end_nodes, points_idx[:, 1:].flatten()))
+        else:
+            for i in range(len(patches)):
+                start_nodes = np.hstack((start_nodes, np.tile(i, len(patches))))
+                end_nodes = np.hstack((end_nodes, [val for val in range(len(patches))]))
 
         # Makes the ReadoutMeshGraph Bidirectional
         tmp = np.array(start_nodes)
@@ -75,6 +84,6 @@ class MeshGraph(dgl.DGLGraph):
         plt.show()
 
     def to(self, device, **kwargs):
+
         self.patches = [self.patches[i].to(device) for i in range(len(self.patches))]
         return super().to(device, **kwargs)
-

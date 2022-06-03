@@ -1,7 +1,7 @@
 import torch
 
 from PlotUtils import plot_model_parameters_comparison, plot_embeddings_space, plot_embeddings
-from SpiderDatasets.MeshGraphDataset import MeshGraphDatasetForNNTraining
+from SpiderDatasets.MeshGraphForTrainingDataset import MeshGraphDatasetForNNTraining
 from SpiderPatch.Networks import MeshNetwork
 
 
