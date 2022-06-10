@@ -3,7 +3,7 @@ import warnings
 import torch
 
 from GeometricUtils import faceArea
-
+import open3d as o3d
 import dgl.data
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -17,6 +17,8 @@ class Patch(dgl.DGLGraph):
         :param concentricRings:
         """
         self.seed_point = mesh.vertices[seed_point]
+        self.rings = len(concentricRings)
+        self.points_per_ring = len(concentricRings[0])
 
         start_nodes = np.empty(0, dtype=int)
         end_nodes = np.empty(0, dtype=int)
@@ -51,7 +53,7 @@ class Patch(dgl.DGLGraph):
                     if ring < concentricRings.getRingsNumber() - 1:  # If not last ring
                         if any(~np.isnan(concentricRings[(ring + 1)][elem])):  # Controllo che il nodo nella stessa posizione del nodo corrente ma nell'anello successivo sia NON nan
                             outer_node_id = current_node + len(concentricRings[ring].getNonNan()[concentricRings[ring].getNonNan().index(elem):]) + len(concentricRings[ring + 1].getNonNan()[:concentricRings[ring + 1].getNonNan().index(
-                                elem)])  # Sommo al nodo corrente gli elementi non nan rimanenti nel ring e gli elementi  non nan che precedono il nodo nella stessa posizione del nodo corrente ma nell'anello successivo
+                                elem)])  # Sommo al nodo corrente gli elementi non nan rimanenti nel ring e gli elementi non nan che precedono il nodo nella stessa posizione del nodo corrente ma nell'anello successivo
                             start_nodes = np.hstack((start_nodes, [current_node], [outer_node_id]))
                             end_nodes = np.hstack((end_nodes, [outer_node_id], [current_node]))
                             # do all'edge peso pari a 1 essendo un edge di collegamento tra due nodi su anelli diversi
@@ -67,7 +69,12 @@ class Patch(dgl.DGLGraph):
 
         # Calculate NODE features
         node_features = {}
+
+        node_features["vertices"] = np.array(self.seed_point)
+        node_features["vertices"] = np.vstack((node_features["vertices"], concentricRings.getNonNaNPoints()))
+
         mesh_face_idx = concentricRings.getNonNaNFacesIdx()
+
         node_features["v_normals"] = np.mean(mesh.vertex_normals()[mesh.faces[mesh.vertex_faces[seed_point]]].reshape((-1, 9)), axis=0)
         node_features["v_normals"] = np.vstack((node_features["v_normals"], mesh.vertex_normals()[mesh.faces[mesh_face_idx]].reshape((-1, 9))))
 
@@ -97,11 +104,21 @@ class Patch(dgl.DGLGraph):
             self.edata[key] = torch.tensor(value, dtype=torch.float32)
 
     def draw(self):
-        nx_G = self.to_networkx().to_undirected()
-        # Kamada-Kawaii layout usually looks pretty for arbitrary graphs
-        pos = nx.kamada_kawai_layout(nx_G)
-        nx.draw(nx_G, pos, with_labels=True, node_color=[[.7, .7, .7]])
-        plt.show()
+        o3d.visualization.draw_geometries(self.to_draw())
+
+    def to_draw(self):
+        points = o3d.utility.Vector3dVector(self.ndata["vertices"])
+        edges = self.edges()
+        lines = o3d.utility.Vector2iVector([[edges[0][i], edges[1][i]] for i in range(len(edges[0]))])
+
+        line_set = o3d.geometry.LineSet()
+        line_set.points = points
+        line_set.lines = lines
+
+        point_cloud = o3d.geometry.PointCloud()
+        point_cloud.points = points
+
+        return [line_set, point_cloud]
 
     def getNodeFeatsNames(self):
         return list(self.ndata.keys())

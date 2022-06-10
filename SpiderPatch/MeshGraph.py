@@ -1,6 +1,6 @@
 import warnings
 from copy import deepcopy
-
+import open3d as o3d
 import torch
 
 from scipy.spatial import KDTree
@@ -31,8 +31,8 @@ class MeshGraph(dgl.DGLGraph):
             patch = patches[i]
             # Aggrego le features dei nodi di ogni patch per poter fare il readout (lo faccio in local_scope coosì non rischio di modificare la patch)
             with patch.local_scope():
-                patch.ndata["aggregated_feats"] = patch.ndata[feats_names[0]]
-                for name in feats_names[1:]:
+                patch.ndata["aggregated_feats"] = patch.ndata[feats_names[1]]
+                for name in feats_names[2:]:
                     if patch.node_attr_schemes()[name].shape == ():
                         patch.ndata["aggregated_feats"] = torch.hstack((patch.ndata["aggregated_feats"], torch.reshape(patch.ndata[name], (-1, 1))))
                     else:
@@ -58,13 +58,17 @@ class MeshGraph(dgl.DGLGraph):
             end_nodes = np.hstack((end_nodes, points_idx[:, 1:].flatten()))
         else:
             for i in range(len(patches)):
-                start_nodes = np.hstack((start_nodes, np.tile(i, len(patches))))
-                end_nodes = np.hstack((end_nodes, [val for val in range(len(patches))]))
+                start_nodes = np.hstack((start_nodes, np.tile(i, len(patches) - 1)))
+                tmp_edges = list(range(len(patches)))
+                tmp_edges.remove(i)
+                end_nodes = np.hstack((end_nodes, tmp_edges))
 
         # Makes the ReadoutMeshGraph Bidirectional
         tmp = np.array(start_nodes)
         start_nodes = np.hstack((start_nodes, end_nodes))
         end_nodes = np.hstack((end_nodes, tmp))
+
+        # Remove self-loops
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
@@ -82,6 +86,37 @@ class MeshGraph(dgl.DGLGraph):
         pos = nx.kamada_kawai_layout(nx_G)
         nx.draw(nx_G, pos, with_labels=True, node_color=[[.7, .7, .7]])
         plt.show()
+
+    def draw_on_mesh(self, mesh):
+        # points = np.empty((0,3))
+        # lines = np.empty((0,2), dtype=int)
+
+        # for patch in self.patches:
+        #     points = np.vstack((points, patch.ndata["vertices"]))
+        #     edges = patch.edges()
+        #     lines = np.vstack((lines, [[edges[0][i], edges[1][i]] for i in range(len(edges[0]))]))
+
+        # points = o3d.utility.Vector3dVector(points)
+        # lines = o3d.utility.Vector2iVector(lines)
+        points = np.empty((0, 3))
+        for patch in self.patches:
+            points = np.vstack((points, patch.ndata["vertices"][0].detach().cpu().numpy()))
+
+        points = o3d.utility.Vector3dVector(points)
+        edges = self.edges()
+        lines = o3d.utility.Vector2iVector([[edges[0][i], edges[1][i]] for i in range(len(edges[0]))])
+
+        line_set = o3d.geometry.LineSet()
+        line_set.points = points
+        line_set.lines = lines
+
+        line_set = o3d.geometry.LineSet()
+        line_set.points = points
+        line_set.lines = lines
+
+        point_cloud = o3d.geometry.PointCloud()
+        point_cloud.points = points
+        o3d.visualization.draw_geometries([mesh.mesh, point_cloud, lines], mesh_show_back_face=True)
 
     def to(self, device, **kwargs):
 

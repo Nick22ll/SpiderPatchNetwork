@@ -13,7 +13,6 @@ class ConcentricRings:
             self.rings = []
             self.seed_point = args[0]
 
-
     def __getitem__(self, *args):
         if isinstance(args[0], (int, slice)):
             return self.rings[args[0]]
@@ -22,6 +21,9 @@ class ConcentricRings:
         elif isinstance(args[0][0], int) and isinstance(args[0][1], int):
             return self.rings[args[0][0]].points[args[0][1]]
         return [self.rings[i] for i in args[0]]
+
+    def __len__(self):
+        return len(self.rings)
 
     def getFaces(self, *args):
         if isinstance(args[0][0], slice) and isinstance(args[0][1], slice):
@@ -47,7 +49,7 @@ class ConcentricRings:
         while i < valid_number and i < len(self.rings):
             if len(self.rings[i].getNonNan()) != len(self.rings[i]):
                 return False
-            i+=1
+            i += 1
         return True
 
     def addRing(self, *args):
@@ -93,5 +95,3 @@ class Ring:
 
     def getNonNan(self):
         return list(np.where(np.any(~np.isnan(self.points), axis=1) == True)[0])
-
-

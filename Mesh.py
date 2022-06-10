@@ -1,8 +1,7 @@
-
 import open3d as o3d
 
 import trimesh
-from trimesh import caching, Trimesh
+from trimesh import caching
 from MeshCurvatures import *
 
 
@@ -35,7 +34,7 @@ class Mesh:
 
     def computeDataStructures(self):
         self.vertices = np.asarray(self.mesh.vertices)
-        self.faces =np.asarray(self.mesh.triangles)
+        self.faces = np.asarray(self.mesh.triangles)
         self.mesh.compute_vertex_normals()
         self.mesh.compute_triangle_normals()
         self.mesh.compute_adjacency_list()
@@ -49,7 +48,7 @@ class Mesh:
     def computeEdges(self):
         """
         Calculates edges of every mesh triangle (face)
-        :return edges: a array with dimensions (num_edges, 2), it is an array of mesh vertex indices
+        :return edges: an array with dimensions (num_edges, 2), it is an array of mesh vertex indices
         """
         first_edges = self.faces[:, [0, 1]]
         second_edges = self.faces[:, [1, 2]]
@@ -153,6 +152,18 @@ class Mesh:
         cloud = o3d.geometry.PointCloud(points)
         o3d.visualization.draw_geometries([self.mesh, cloud], mesh_show_back_face=True)
 
+    def draw_with_patches(self, patches):
+        for_draw_patches = []
+        for patch in patches:
+            for_draw_patches.extend(patch.to_draw())
+        o3d.visualization.draw_geometries([self.mesh] + for_draw_patches, mesh_show_back_face=True)
+
+    def draw_with_MeshGraph(self, mesh_graph):
+        for_draw_patches = []
+        for patch in mesh_graph.patches:
+            for_draw_patches.extend(patch.to_draw())
+        o3d.visualization.draw_geometries([self.mesh] + for_draw_patches, mesh_show_back_face=True)
+
     def load(self, mesh_path):
         """
         Load a mesh. Format avaiable: .inp), ANSYS msh (.msh), AVS-UCD (.avs), CGNS (.cgns), DOLFIN XML (.xml), Exodus (.e, .exo), FLAC3D (.f3grid), H5M (.h5m), Kratos/MDPA (.mdpa), Medit (.mesh, .meshb), MED/Salome (.med), Nastran (bulk data, .bdf, .fem, .nas), Netgen (.vol, .vol.gz), Neuroglancer precomputed format, Gmsh (format versions 2.2, 4.0, and 4.1, .msh), OBJ (.obj), OFF (.off), PERMAS (.post, .post.gz, .dato, .dato.gz), PLY (.ply), STL (.stl), Tecplot .dat, TetGen .node/.ele, SVG (2D output only) (.svg), SU2 (.su2), UGRID (.ugrid), VTK (.vtk), VTU (.vtu), WKT (TIN) (.wkt), XDMF (.xdmf, .xmf).
@@ -166,7 +177,6 @@ class Mesh:
     def save(self, path):
         """
         Save a mesh.
-        :param mesh: the mesh object to save
         :param path: the path with filename and extension (ex. C:/user/file/mesh_filename.off )
         :return: None
         """
@@ -317,6 +327,5 @@ def expandFacetv2(facet, mesh):
     # expanded_facet = array([facet], dtype=int) #Include also the initial facet
     expanded_facet = np.empty(0, dtype=int)
     for face_idx in np.where(facet != -1)[0]:
-        prova = mesh.face_adjacency_list[face_idx]
         expanded_facet = np.hstack((expanded_facet, mesh.face_adjacency_list[face_idx]))
     return np.unique(expanded_facet)

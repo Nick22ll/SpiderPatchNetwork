@@ -1,4 +1,3 @@
-from CSI.CSI import *
 from GeometricUtils import *
 
 from sklearn.metrics import pairwise_distances
@@ -116,7 +115,7 @@ def intersectCircleMesh(vertices, facetIn, facetOut, faceIn_idx, original_mesh, 
         if p_candidate.shape[0] > 1:
             wrong = findWrongPCandidate(original_mesh, p_candidate_facet, p_candidate)
             p_candidate = p_candidate[np.logical_not(wrong)]
-            p_candidate_facet = p_candidate_facet[np.logical_not(wrong)]
+            # p_candidate_facet = p_candidate_facet[np.logical_not(wrong)]
         if p_candidate.shape[0] > 1:
             if facetOut.shape[0] == 0:
                 best = findBestPCandidate(p_candidate, mid_point)

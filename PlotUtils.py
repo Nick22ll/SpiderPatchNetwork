@@ -221,42 +221,10 @@ def plot_model_parameters_comparison(paths):
     plt.close()
 
 
-def plot_embeddings_space(model, dataset_paths, device, filename=None):
+def plot_embeddings(model, dataset, device, filename=None):
     embeddings = np.empty((0, model.readout_dim))
     embeddings_labels = np.empty(0, dtype=np.int32)
 
-    for dataset_path_id in range(len(dataset_paths)):
-        dataset_path = dataset_paths[dataset_path_id]
-        dataset = MeshGraphDatasetForNNTraining()
-        dataset.load(dataset_path, dataset_path.split("/")[-1].replace("_Normalized", ""))
-        dataset.to(device)
-        dataloader = GraphDataLoader(dataset.train_dataset, batch_size=1, drop_last=False)
-
-        sampler = 0
-
-        for graph, label in dataloader:
-            tmp = model(graph, dataset.train_dataset.graphs[sampler].patches, device)[1]
-            embeddings = np.vstack((embeddings, tmp.detach().cpu().numpy()))
-            embeddings_labels = np.hstack((embeddings_labels, [dataset_path_id] * tmp.shape[0]))
-            sampler += 1
-
-    embeddings = TSNE(n_components=2, learning_rate='auto', init='random').fit_transform(embeddings)
-
-    palette = np.array(sns.color_palette("hls", len(dataset_paths)))
-    f, ax = plt.subplots()
-    for c in np.unique(embeddings_labels):
-        ax.scatter(embeddings[embeddings_labels == c, 0], embeddings[embeddings_labels == c, 1], label=c, color=palette[c])
-    ax.legend(title="Classes")
-    if filename is None:
-        plt.show()
-    else:
-        plt.savefig(filename)
-
-
-def plot_embeddings(model, dataset, device, filename=None):
-    embeddings = torch.empty((0, model.readout_dim), device=device)
-    embeddings_labels = np.empty(0, dtype=np.int32)
-
     dataloader = GraphDataLoader(dataset, batch_size=1, drop_last=False)
 
     sampler = 0
@@ -277,10 +245,10 @@ def plot_embeddings(model, dataset, device, filename=None):
     if filename is None:
         plt.show()
     else:
-        plt.savefig(filename)
+        plt.savefig(filename + "_EmbSpace.png")
 
     fig = plt.figure()
-    axes = fig.subplots(5, 3, sharex="none", sharey="none")
+    axes = fig.subplots(5, 3, sharex=True, sharey=True)
     flat_axes = axes.flat
     for i, c in enumerate(np.unique(embeddings_labels)):
         flat_axes[i].scatter(embeddings[embeddings_labels == c, 0], embeddings[embeddings_labels == c, 1], label=c, color=palette[c])
@@ -288,36 +256,7 @@ def plot_embeddings(model, dataset, device, filename=None):
     if filename is None:
         plt.show()
     else:
-        plt.savefig(filename)
-
-
-def plot_embeddings_v2(model, dataset, device, filename=None):
-    embeddings = torch.empty((0, model.readout_dim), device=device)
-    embeddings_labels = np.empty(0, dtype=np.int32)
-
-    dataloader = GraphDataLoader(dataset, batch_size=1, drop_last=False)
-
-    sampler = 0
-    for graph, label in dataloader:
-        tmp = model(graph, dataset.graphs[sampler].patches, device)[1]
-        embeddings = torch.vstack((embeddings, tmp))
-        embeddings_labels = np.hstack((embeddings_labels, np.tile(label.detach().cpu().numpy(), tmp.shape[0])))
-        sampler += 1
-
-    embeddings = embeddings.detach().cpu().numpy()
-    embeddings = TSNE(n_components=2, learning_rate='auto', init='random').fit_transform(embeddings)
-
-    palette = np.array(sns.color_palette("hls", len(np.unique(embeddings_labels))))
-    fig = plt.figure()
-    axes = fig.subplots(5, 3, sharex="none", sharey="none")
-    flat_axes = axes.flat
-    for i, c in enumerate(np.unique(embeddings_labels)):
-        flat_axes[i].scatter(embeddings[embeddings_labels == c, 0], embeddings[embeddings_labels == c, 1], label=c, color=palette[c])
-    # ax.legend(title="Classes")
-    if filename is None:
-        plt.show()
-    else:
-        plt.savefig(filename)
+        plt.savefig(filename="_Embeddings.png")
 
 
 def print_weights(model):

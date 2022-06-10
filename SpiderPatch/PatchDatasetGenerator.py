@@ -1,5 +1,6 @@
 import os
 import pickle
+import random
 
 from tqdm import tqdm
 
@@ -26,7 +27,7 @@ def generatePatchDataset(mesh_dataset="SHREC17", save_path="", configurations=No
     :return:
     """
     if configurations is None:
-        configurations = np.array([[5, 4, 6], [7, 4, 8], [10, 6, 6]])
+        configurations = np.array([[7, 4, 8], [10, 6, 6], [5, 4, 6]])
 
     if start_idx is None:
         start_idx = 0
@@ -61,8 +62,8 @@ def generatePatchDataset(mesh_dataset="SHREC17", save_path="", configurations=No
             max_radius = np.max(configurations[:, 0]) / np.min(configurations[:, 1])
             boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil(1.5 * max_radius)))
             # Under development uses a fixed seed points sequence
-            np.random.seed(22)
-            seed_point_sequence = np.unique(np.random.randint(0, vertices_number - 1, size=2000))
+            random.seed(666)
+            seed_point_sequence = random.sample(range(vertices_number - 1), 2000)
             for config in tqdm(configurations, position=0, leave=True, desc=f"Mesh ID {mesh_id}: ", colour="white", ncols=80):
                 radius, rings, points = config
                 # Generate N number of patches for a single mesh
@@ -82,6 +83,7 @@ def generatePatchDataset(mesh_dataset="SHREC17", save_path="", configurations=No
 
                     patch = Patch(concentric_rings, mesh, seed_point)
                     patches.append(patch)
+
                     concentric_rings_list.append(concentric_rings)
                     processed_patch += 1
                 os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}", exist_ok=True)
