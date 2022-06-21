@@ -78,13 +78,15 @@ def plot_grad_flow(named_parameters):
             layers.append(n)
             ave_grads.append(p.grad.abs().mean().cpu().detach().numpy())
             max_grads.append(p.grad.abs().max().cpu().detach().numpy())
+            if ave_grads[-1] == 0 or max_grads[-1] == 0:
+                print(n)
     plt.bar(np.arange(len(max_grads)), max_grads, alpha=0.1, lw=1, color="c")
     plt.bar(np.arange(len(max_grads)), ave_grads, alpha=0.1, lw=1, color="b")
     plt.hlines(0, 0, len(ave_grads) + 1, lw=2, color="k")
-    layers = [layers[i].replace("weight", "") for i in range(len(layers))]
-    plt.xticks(range(0, len(ave_grads), 1), layers, rotation=45)
+    layers = [layers[i].replace(".weight", "") for i in range(len(layers))]
+    plt.xticks(range(0, len(ave_grads), 1), layers, rotation=90)
     plt.xlim(left=0, right=len(ave_grads))
-    plt.ylim(bottom=-0.001, top=0.02)  # zoom in on the lower gradient regions
+    plt.ylim(bottom=-0.001, top=np.max(ave_grads) / 2)  # zoom in on the lower gradient regions
     plt.xlabel("Layers")
     plt.ylabel("average gradient")
     plt.title("Gradient flow")
@@ -111,7 +113,7 @@ def plot_training_statistics(filename, epochs, losses, val_accuracies, val_losse
 def save_embeddings_statistics(path, embeddings, id):
     os.makedirs(path, exist_ok=True)
     with open(f"{path}/patch_embedding_Epoch{id}.pkl", "wb") as embeddings_file:
-        pickle.dump(embeddings, embeddings_file)
+        pickle.dump(embeddings, embeddings_file, protocol=-1)
 
 
 def load_embeddings_statistics(path, id):

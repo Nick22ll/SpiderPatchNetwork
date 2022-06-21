@@ -11,42 +11,24 @@ import numpy as np
 
 
 class MeshGraph(dgl.DGLGraph):
-    def __init__(self, patches, feats_names="all", neighbours_number=0):
+    def __init__(self, patches, neighbours_number=0, sample_id=None, mesh_id=None, resolution_level=None):
         """
 
         @param patches: a list of Patch representing nodes of the MeshGraph
         @param feats_names: list of names of features to extract from patches
         @param neighbours_number: number of Patches to consider neighbours (to generate the MeshGraph edges), leave "0" to make a fully connected graph
         """
-        if feats_names == "all":
-            feats_names = patches[0].getNodeFeatsNames()
 
         self.patches = []
-
+        self.sample_id = sample_id
+        self.mesh_id = mesh_id
+        self.resolution_level = resolution_level
         start_nodes = np.empty(0, dtype=int)
         end_nodes = np.empty(0, dtype=int)
         seed_points = np.empty((0, 3))
 
-        for i in range(len(patches)):
-            patch = patches[i]
-            # Aggrego le features dei nodi di ogni patch per poter fare il readout (lo faccio in local_scope coosì non rischio di modificare la patch)
-            with patch.local_scope():
-                patch.ndata["aggregated_feats"] = patch.ndata[feats_names[1]]
-                for name in feats_names[2:]:
-                    if patch.node_attr_schemes()[name].shape == ():
-                        patch.ndata["aggregated_feats"] = torch.hstack((patch.ndata["aggregated_feats"], torch.reshape(patch.ndata[name], (-1, 1))))
-                    else:
-                        patch.ndata["aggregated_feats"] = torch.hstack((patch.ndata["aggregated_feats"], patch.ndata[name]))
-
-                edge_feats_names = patches[0].getEdgeFeatsNames()
-                patch.edata["weights"] = patch.edata[edge_feats_names[0]]
-                for name in edge_feats_names[1:]:
-                    if patch.edge_attr_schemes()[name].shape == ():
-                        patch.edata["weights"] = torch.hstack((patch.edata["weights"], torch.reshape(patch.edata[name], (-1, 1))))
-                    else:
-                        patch.edata["weights"] = torch.hstack((patch.edata["weights"], patch.edata[name]))
-
-                self.patches.append(deepcopy(patch))
+        for patch in patches:
+            self.patches.append(deepcopy(patch))
             seed_points = np.vstack((seed_points, patch.seed_point))
 
         # Calculate the MeshGraphs edges

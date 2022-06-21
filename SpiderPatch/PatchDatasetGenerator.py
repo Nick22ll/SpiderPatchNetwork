@@ -16,7 +16,7 @@ DATASETS = {
 }
 
 
-def generatePatchDataset(mesh_dataset="SHREC17", save_path="", configurations=None, to_extract="all", patch_per_mesh=200, start_idx=None, stop_idx=None):
+def generatePatchDataset(mesh_dataset="SHREC17", save_path="", configurations=None, to_extract="all", patch_per_mesh=500, start_idx=None, stop_idx=None):
     """
 
     :param mesh_dataset:
@@ -27,7 +27,7 @@ def generatePatchDataset(mesh_dataset="SHREC17", save_path="", configurations=No
     :return:
     """
     if configurations is None:
-        configurations = np.array([[7, 4, 8], [10, 6, 6], [5, 4, 6]])
+        configurations = np.array([[10, 6, 6]])
 
     if start_idx is None:
         start_idx = 0
@@ -50,8 +50,8 @@ def generatePatchDataset(mesh_dataset="SHREC17", save_path="", configurations=No
     if stop_idx is None:
         stop_idx = len(mesh_to_extract)
 
-    for mesh_type in tqdm(mesh_to_extract[start_idx:stop_idx], position=0, leave=True, desc=f"Calculating Mesh: ", colour="green", ncols=120):
-        for level, tup in mesh_type.items():
+    for sample_id, sample in tqdm(enumerate(mesh_to_extract[start_idx:stop_idx]), position=0, leave=True, desc=f"Calculating Mesh: ", colour="green", ncols=120):
+        for level, tup in sample.items():
             mesh_id = tup[0]
             label = tup[1]
             mesh = Mesh()
@@ -63,7 +63,8 @@ def generatePatchDataset(mesh_dataset="SHREC17", save_path="", configurations=No
             boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil(1.5 * max_radius)))
             # Under development uses a fixed seed points sequence
             random.seed(666)
-            seed_point_sequence = random.sample(range(vertices_number - 1), 2000)
+            seed_point_sequence = list(np.unique(random.sample(range(vertices_number - 1), 4000)))
+            random.shuffle(seed_point_sequence)
             for config in tqdm(configurations, position=0, leave=True, desc=f"Mesh ID {mesh_id}: ", colour="white", ncols=80):
                 radius, rings, points = config
                 # Generate N number of patches for a single mesh
@@ -87,15 +88,17 @@ def generatePatchDataset(mesh_dataset="SHREC17", save_path="", configurations=No
                     concentric_rings_list.append(concentric_rings)
                     processed_patch += 1
                 os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}", exist_ok=True)
-                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}/{level}", exist_ok=True)
-                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}/{level}/{str(label)}", exist_ok=True)
-                with open(f"{save_path}_R{radius}_RI{rings}_P{points}/{level}/{str(label)}/patches{mesh_id}.pkl", 'wb') as file:
-                    pickle.dump(patches, file)
+                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}/{sample_id}", exist_ok=True)
+                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}/{sample_id}/{level}", exist_ok=True)
+                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}/{sample_id}/{level}/{str(label)}", exist_ok=True)
+                with open(f"{save_path}_R{radius}_RI{rings}_P{points}/{sample_id}/{level}/{str(label)}/patches{mesh_id}.pkl", 'wb') as file:
+                    pickle.dump(patches, file, protocol=-1)
                 os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}", exist_ok=True)
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/{level}/", exist_ok=True)
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/{level}/{str(label)}", exist_ok=True)
-                with open(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/{level}/{str(label)}/concentric_rings{mesh_id}.pkl", 'wb') as file:
-                    pickle.dump(concentric_rings_list, file)
+                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/{sample_id}", exist_ok=True)
+                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/{sample_id}/{level}/", exist_ok=True)
+                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/{sample_id}/{level}/{str(label)}", exist_ok=True)
+                with open(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/{sample_id}/{level}/{str(label)}/concentric_rings{mesh_id}.pkl", 'wb') as file:
+                    pickle.dump(concentric_rings_list, file, protocol=-1)
 
 
 def getSHREC17MeshClasses():

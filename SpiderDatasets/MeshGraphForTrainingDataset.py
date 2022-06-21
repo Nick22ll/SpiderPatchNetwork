@@ -2,6 +2,8 @@ import random
 import os
 import numpy as np
 import torch
+from tqdm import tqdm
+
 from SpiderDatasets.MeshGraphDataset import MeshGraphDataset
 
 
@@ -20,52 +22,67 @@ class MeshGraphDatasetForNNTraining:
     def __len__(self):
         return len(self.train_dataset) + len(self.validation_dataset) + len(self.test_dataset)
 
-    def split_graphs(self, graphs, labels, mesh_id):
-        a = id(graphs[0])
-        random.seed(22)
+    def split_dataset(self, dataset, seed=22, to_train=None, to_test=None):
+        random.seed(seed)
         data_train, label_train = [], []
         data_test, label_test = [], []
         data_validation, label_validation = [], []
-        train_indices, test_indices, validation_indices = [], [], []
-        to_train, to_test = [], []
-        unique_labels = np.unique(labels)
-        for label in unique_labels:
-            mesh_idx = np.unique(np.array(mesh_id)[np.where(labels == label)])
-            train = random.sample(list(mesh_idx), int(len(mesh_idx) * 0.80))
-            test = list(set(mesh_idx) - set(train))
-            validation = random.sample(list(test), int(len(test) * 0.50))
-            test = list(set(test) - set(validation))
-            to_train.extend(train)
-            to_test.extend(test)
+        sample_idx_train, sample_idx_test, sample_idx_validation = [], [], []
+        mesh_idx_train, mesh_idx_test, mesh_idx_validation = [], [], []
+        unique_labels = np.unique(dataset.labels)
+
+        if to_train is None and to_test is None:
+            to_train, to_test = [], []
+            for label in unique_labels:
+                sample_idx = np.unique(np.array(dataset.sample_id)[np.where(dataset.labels == label)])
+                train = random.sample(list(sample_idx), int(len(sample_idx) * 0.80))
+                test = list(set(sample_idx) - set(train))
+                validation = random.sample(list(test), int(len(test) * 0.50))
+                test = list(set(test) - set(validation))
+                to_train.extend(train)
+                to_test.extend(test)
+        elif to_train is None:
+            to_train = []
+            for label in unique_labels:
+                sample_idx = np.unique(np.array(dataset.sample_id)[np.where(dataset.labels == label)])
+                sample_idx = list(set(sample_idx) - set(to_test))
+                train = random.sample(list(sample_idx), int(len(sample_idx) * 0.90))
+                to_train.extend(train)
+        elif to_test is None:
+            to_test = []
+            for label in unique_labels:
+                sample_idx = np.unique(np.array(dataset.sample_id)[np.where(dataset.labels == label)])
+                sample_idx = list(set(sample_idx) - set(to_train))
+                test = random.sample(list(sample_idx), int(len(sample_idx) * 0.50))
+                to_train.extend(test)
 
         to_train = set(to_train)
         to_test = set(to_test)
 
-        for i, mesh in enumerate(mesh_id):
-            if mesh in to_train:
-                data_train.append(graphs[i])
-                label_train.append(labels[i])
-                train_indices.append(mesh)
-            elif mesh in to_test:
-                data_test.append(graphs[i])
-                label_test.append(labels[i])
-                test_indices.append(mesh)
+        for i, sample_idx in enumerate(dataset.sample_id):
+            if sample_idx in to_train:
+                data_train.append(dataset.graphs[i])
+                label_train.append(dataset.labels[i])
+                sample_idx_train.append(sample_idx)
+                mesh_idx_train.append(dataset.mesh_id[i])
+            elif sample_idx in to_test:
+                data_test.append(dataset.graphs[i])
+                label_test.append(dataset.labels[i])
+                sample_idx_test.append(sample_idx)
+                mesh_idx_test.append(dataset.mesh_id[i])
             else:
-                data_validation.append(graphs[i])
-                label_validation.append(labels[i])
-                validation_indices.append(mesh)
+                data_validation.append(dataset.graphs[i])
+                label_validation.append(dataset.labels[i])
+                sample_idx_validation.append(sample_idx)
+                mesh_idx_validation.append(dataset.mesh_id[i])
 
-        combined = list(zip(data_train, label_train, train_indices))
+        combined = list(zip(data_train, label_train, sample_idx_train))
         random.shuffle(combined)
-        data_train[:], label_train[:], train_indices[:] = zip(*combined)
+        data_train[:], label_train[:], sample_idx_train[:] = zip(*combined)
 
-        for i, graph in enumerate(data_train):
-            if id(graph) == a:
-                b = i
-
-        self.train_dataset = MeshGraphDataset(dataset_name=self.name + "_train", graphs=data_train, labels=label_train, mesh_id=train_indices)
-        self.test_dataset = MeshGraphDataset(dataset_name=self.name + "_test", graphs=data_test, labels=label_test, mesh_id=test_indices)
-        self.validation_dataset = MeshGraphDataset(dataset_name=self.name + "_val", graphs=data_validation, labels=label_validation, mesh_id=validation_indices)
+        self.train_dataset = MeshGraphDataset(dataset_name=self.name + "_train", graphs=data_train, labels=label_train, sample_id=sample_idx_train, mesh_id=mesh_idx_train)
+        self.test_dataset = MeshGraphDataset(dataset_name=self.name + "_test", graphs=data_test, labels=label_test, sample_id=sample_idx_test, mesh_id=mesh_idx_test)
+        self.validation_dataset = MeshGraphDataset(dataset_name=self.name + "_val", graphs=data_validation, labels=label_validation, sample_id=sample_idx_validation, mesh_id=mesh_idx_validation)
 
     def getNodeFeatsNames(self):
         return self.train_dataset.graphs[0].getNodeFeatsNames()
@@ -74,10 +91,10 @@ class MeshGraphDatasetForNNTraining:
         return self.train_dataset.graphs[0].getEdgeFeatsNames()
 
     def getPatchNodeFeatsNames(self):
-        return self.train_dataset.patches[0].getNodeFeatsNames()
+        return self.train_dataset.graphs[0].patches[0].getNodeFeatsNames()
 
     def getPatchEdgeFeatsNames(self):
-        return self.train_dataset.patches[0].getEdgeFeatsNames()
+        return self.train_dataset.graphs[0].patches[0].getEdgeFeatsNames()
 
     def numClasses(self, partition="all"):
         """
@@ -114,44 +131,60 @@ class MeshGraphDatasetForNNTraining:
         if partition == "test" or partition == "all":
             self.test_dataset.to(device)
 
-    def aggregateNodeFeatures(self, feat_names="all"):
+    def aggregateNodeFeatures(self, feat_names=None):
         """
-
         :param feat_names: list of features key to aggregate in a single feature (called aggregate_feature)
         :return: the aggregate feature shape along axis 1 ( if shape 30x4 --> returns 4 )
         """
-        if feat_names == "all":
-            feat_names = self.getNodeFeatsNames()
+        if feat_names is None:
+            feat_names = self.getPatchNodeFeatsNames()
+            feat_names.remove("vertices")
 
-        for dataset in [self.train_dataset, self.validation_dataset, self.test_dataset]:
-            for i in range(len(dataset)):
-                dataset[i][0].ndata["aggregated_feats"] = dataset[i][0].ndata[feat_names[0]]
-                for name in feat_names[1:]:
-                    if dataset.graphs[0].node_attr_schemes()[name].shape == ():
-                        dataset[i][0].ndata["aggregated_feats"] = torch.hstack((dataset[i][0].ndata["aggregated_feats"], torch.reshape(dataset[i][0].ndata[name], (-1, 1))))
-                    else:
-                        dataset[i][0].ndata["aggregated_feats"] = torch.hstack((dataset[i][0].ndata["aggregated_feats"], dataset[i][0].ndata[name]))
-        return self.train_dataset[0][0].ndata["aggregated_feats"].shape
+        for dataset in tqdm([self.train_dataset, self.validation_dataset, self.test_dataset]):
+            for mesh_graph in tqdm(dataset.graphs):
+                for patch in mesh_graph.patches:
+                    patch.ndata["aggregated_feats"] = patch.ndata[feat_names[0]]
+                    patch.ndata.pop(feat_names[0])
+                    for name in feat_names[1:]:
+                        if patch.node_attr_schemes()[name].shape == ():
+                            patch.ndata["aggregated_feats"] = torch.hstack((patch.ndata["aggregated_feats"], torch.reshape(patch.ndata[name], (-1, 1))))
+                            patch.ndata.pop(name)
+                        else:
+                            patch.ndata["aggregated_feats"] = torch.hstack((patch.ndata["aggregated_feats"], patch.ndata[name]))
+                            patch.ndata.pop(name)
+
+        return self.train_dataset.graphs[0].patches[0].ndata["aggregated_feats"].shape
 
     def aggregateEdgeFeatures(self, feat_names="all"):
         """
-
         :param feat_names: list of features key to aggregate in a single feature (called aggregate_feature)
         :return: the aggregate feature shape along axis 1 ( if shape 30x4 --> returns 4 )
         """
         if feat_names == "all":
-            feat_names = self.getEdgeFeatsNames()
+            feat_names = self.getPatchEdgeFeatsNames()
 
         for dataset in [self.train_dataset, self.validation_dataset, self.test_dataset]:
-            for i in range(len(dataset)):
-                dataset[i][0].edata["weights"] = dataset[i][0].edata[feat_names[0]]
-                for name in feat_names[1:]:
-                    if dataset.graphs[0].edge_attr_schemes()[name].shape == ():
-                        dataset[i][0].edata["weights"] = torch.hstack((dataset[i][0].edata["weights"], torch.reshape(dataset[i][0].edata[name], (-1, 1))))
-                    else:
-                        dataset[i][0].edata["weights"] = torch.hstack((dataset[i][0].edata["weights"], dataset[i][0].edata[name]))
+            for mesh_graph in dataset.graphs:
+                for patch in mesh_graph.patches:
+                    patch.edata["weights"] = patch.edata[feat_names[0]]
+                    for name in feat_names[1:]:
+                        if patch.edge_attr_schemes()[name].shape == ():
+                            patch.edata["weights"] = torch.hstack((patch.edata["weights"], torch.reshape(patch.edata[name], (-1, 1))))
+                            patch.edata.pop(name)
+                        else:
+                            patch.edata["weights"] = torch.hstack((patch.edata["weights"], patch.edata[name]))
+                            patch.edata.pop(name)
 
-        return self.train_dataset[0][0].edata["weights"].shape
+        return self.train_dataset.graphs[0].patches[0].edata["weights"].shape
+
+    def removeNonAggregatedFeatures(self):
+        feats_name = self.getPatchNodeFeatsNames()
+        feats_name.remove("aggregated_feats")
+        for dataset in [self.train_dataset, self.validation_dataset, self.test_dataset]:
+            for mesh_graph in dataset.graphs:
+                for patch in mesh_graph.patches:
+                    for name in feats_name:
+                        patch.ndata.pop(name)
 
     def normalize(self):
         """
@@ -239,4 +272,4 @@ class MeshGraphDatasetForNNTraining:
         dataset = MeshGraphDataset()
         dataset.load_from(dataset_path, dataset_name)
         self.name = dataset.name
-        self.split_graphs(dataset.graphs, dataset.labels, dataset.mesh_id)
+        self.split_dataset(dataset)

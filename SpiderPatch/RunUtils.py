@@ -134,7 +134,7 @@ class RunManager:
             filename += f"_{time.strftime('%d %b %Y %H-%M', time.localtime(self.run_start_time))} - Epoch{self.epoch_count}"
 
             with open(f"{self.path}/TrainingValidationConfusionMatrices/" + filename, 'wb') as f:
-                pickle.dump(confusion_matrix, f)
+                pickle.dump(confusion_matrix, f, protocol=-1)
 
     def save_validation(self):
         filename = f"validation"
