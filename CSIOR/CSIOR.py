@@ -14,12 +14,12 @@ def CSIOR(original_mesh, edge_length=None, seed_point_idx=None):
     Circle-Surface Intersection Ordered Resampling (CSIOR), a mesh tesselation algorithm that resample a mesh in a equilateral(quasi-equilateral) triangular mesh
     preserving the object shape and local geometric properties as corrugations or relief patterns.
 
-    :param original_mesh: the mesh to resample
-    :param edge_length: (optional) desired equilateral edge length, if None is calculated as the average of the original mesh edge lengths
-    :param seed_point_idx: (optional) original mesh point from which start the resampling
+    @param original_mesh: the mesh to resample
+    @param edge_length: (optional) desired equilateral edge length, if None is calculated as the average of the original mesh edge lengths
+    @param seed_point_idx: (optional) original mesh point from which start the resampling
 
-    :return resampled_mesh: the resampled mesh
-    :return rings:
+    @return resampled_mesh: the resampled mesh
+    @return rings:
     """
     CSIOR_start = time.time()
     if not edge_length:
@@ -196,9 +196,9 @@ def CSIOR(original_mesh, edge_length=None, seed_point_idx=None):
 
 def updateValence(vertices_valence, face):
     """
-    :param vertices_valence: array of vertices valences
-    :param face: a 3x1 array of vertex indices representing a face
-    :return:
+    @param vertices_valence: array of vertices valences
+    @param face: a 3x1 array of vertex indices representing a face
+    @return:
     """
     if np.any(face >= vertices_valence.shape[0]):
         vertices_valence = np.append(vertices_valence, 0)
@@ -211,14 +211,14 @@ def generateSeedPoint(mesh):
     pca = PCA(n_components=3)
     pca.fit(mesh.vertices)
     less_var_vector = pca.components_[2]
-    return intersectLineSurface(mesh.vertices, less_var_vector, np.mean(mesh.vertices, axis=0))
+    return intersectLineDiscreteSurface(mesh.vertices, less_var_vector, np.mean(mesh.vertices, axis=0))
 
 
 def generate_hex_vertices(radius):
     """
     Generates hexagon vertices tha are laying on a circle.
-    :param radius: scalar, the radius of the circle.
-    :return: (6x3) array, the hexagon vertices
+    @param radius: scalar, the radius of the circle.
+    @return: (6x3) array, the hexagon vertices
     """
     angles = np.arange(0, pi * 2, pi / 3).reshape((6, 1))
     x = radius * np.cos(angles)
@@ -230,11 +230,11 @@ def generate_hex_vertices(radius):
 def project_hexagon(center_point, mesh_vertices, nbh_region_size, hexagon):
     """
     Project an hexagon on a mesh surface
-    :param center_point: the point of the mesh in which the hexagon will be centered
-    :param mesh_vertices:
-    :param nbh_region_size: neighbourhood region size, it determines the considered region for the calculus of the region normal
-    :param hexagon: (6x3) hexagon to project
-    :return:
+    @param center_point: the point of the mesh in which the hexagon will be centered
+    @param mesh_vertices:
+    @param nbh_region_size: neighbourhood region size, it determines the considered region for the calculus of the region normal
+    @param hexagon: (6x3) hexagon to project
+    @return:
     """
     mesh_vertices = mesh_vertices - center_point  # Traslate to the center point
     v_distances = norm(mesh_vertices, axis=1)

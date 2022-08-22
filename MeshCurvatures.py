@@ -5,12 +5,13 @@ from trimesh import Trimesh
 from trimesh.curvature import discrete_mean_curvature_measure, discrete_gaussian_curvature_measure
 
 
-def getCurvatures(mesh):
+def getCurvatures(mesh, radius):
     ## VERTEX FEATURES
-    Cmean_vertex, Cgauss_vertex, __, __, lambda1, lambda2 = principalCurvatures(mesh, True)
+    Cmean_vertex, Cgauss_vertex, __, __, lambda1, lambda2 = principalArbitraryCurvatures(mesh, radius)
     Curvedness_vertex = np.sqrt((np.multiply(lambda1, lambda1) + np.multiply(lambda2, lambda2)) / 2)
     K2_vertex = np.maximum(lambda1, lambda2)
-    localDepth_vertex = calculateLocalDepth(mesh)
+    localDepth_vertex = calculateArbitraryLocalDepth(mesh, mesh.vertices, radius)
+    # localDepth_vertex = calculateLocalDepth(mesh)
     vertex_curvatures = {"mean_curvature": Cmean_vertex, "gauss_curvature": Cgauss_vertex, "curvedness": Curvedness_vertex, "K2": K2_vertex, "local_depth": localDepth_vertex}
 
     ## FACET FEATURES
@@ -21,6 +22,54 @@ def getCurvatures(mesh):
     face_curvatures["K2"] = (K2_vertex[mesh.faces[:, 0]] + K2_vertex[mesh.faces[:, 1]] + K2_vertex[mesh.faces[:, 2]]) / 3
     face_curvatures["local_depth"] = (localDepth_vertex[mesh.faces[:, 0]] + localDepth_vertex[mesh.faces[:, 1]] + localDepth_vertex[mesh.faces[:, 2]]) / 3
     return vertex_curvatures, face_curvatures
+
+
+def principalArbitraryCurvatures(mesh, radius):
+    # Number of vertices
+    vertex_number = mesh.vertices.shape[0]
+
+    # Calculate vertices normals
+    vertex_normals = mesh.vertex_normals()
+
+    Lambda1 = np.zeros((vertex_number, 1))
+    Lambda2 = np.zeros((vertex_number, 1))
+    Dir1 = np.zeros((vertex_number, 3))
+    Dir2 = np.zeros((vertex_number, 3))
+
+    for i in range(0, vertex_number):
+        rot, invRot = VectorRotationMatrix(vertex_normals[i])
+        seed_point = mesh.vertices[i]
+        neigh_vertices = np.where(pairwise_distances(mesh.vertices, seed_point.reshape((1, -1)), metric="sqeuclidean") < radius)[0]
+        neigh_vertices = mesh.vertices[neigh_vertices]
+        while len(neigh_vertices) <= 5:
+            radius *= 1.2
+            neigh_vertices = np.where(pairwise_distances(mesh.vertices, seed_point.reshape((1, -1)), metric="sqeuclidean") < radius)[0]
+            neigh_vertices = mesh.vertices[neigh_vertices]
+
+        We = np.dot(neigh_vertices, invRot)
+        f = We[:, 0]
+        x = We[:, 1]
+        y = We[:, 2]
+
+        # f(x,y) = ax^2 + by^2 + cxy + dx + ey + f
+        FM = np.transpose(np.vstack((np.ravel(x) ** 2, np.ravel(y) ** 2, (np.ravel(x) * np.ravel(y)), np.ravel(x), np.ravel(y), np.ones(np.size(x)))))
+        sol = np.linalg.lstsq(FM, np.ravel(f), rcond=None)[0]
+
+        # H =  [2*a c;c 2*b];
+        Dxx = 2 * sol[0]
+        Dxy = sol[2]
+        Dyy = 2 * sol[1]
+
+        Lambda1[i], Lambda2[i], I1, I2 = eig2(Dxx, Dxy, Dyy)
+        dir1 = np.dot(np.hstack((0, I1[0], I1[1])), rot)
+        dir2 = np.dot(np.hstack((0, I2[0], I2[1])), rot)
+        Dir1[i, :] = dir1 / np.sqrt(dir1[0] ** 2 + dir1[1] ** 2 + dir1[2] ** 2)
+        Dir2[i, :] = dir2 / np.sqrt(dir2[0] ** 2 + dir2[1] ** 2 + dir2[2] ** 2)
+
+    Cmean = (Lambda1 + Lambda2) / 2
+    Cgaussian = Lambda1 * Lambda2
+
+    return Cmean.flatten(), Cgaussian.flatten(), Dir1.flatten(), Dir2.flatten(), Lambda1.flatten(), Lambda2.flatten()
 
 
 def principalCurvatures(mesh, usethird=False):
@@ -122,10 +171,10 @@ def calculateCurvaturesOnPoint(mesh, points, radius_multiplier=1.0):
     Gaussian Curvature is the sum of the vertex defects at all vertices within the radius for each point.
     Mean Curvature is the sum of the angle at all edges contained in the sphere for each point.
 
-    :param mesh: a Mesh() object
-    :param points:  ((n, 3) float) – Points in space
-    :param radius_multiplier:  (float) – Sphere radius multiplier which should typically be greater than zero. The base sphere radius is calculated as the average mesh faces edge lenght
-    :return: G, H (((n,),(n,)) float)
+    @param mesh: a Mesh() object
+    @param points:  ((n, 3) float) – Points in space
+    @param radius_multiplier:  (float) – Sphere radius multiplier which should typically be greater than zero. The base sphere radius is calculated as the average mesh faces edge lenght
+    @return: G, H (((n,),(n,)) float)
     """
     points = points.reshape((-1, 3))
     radius = 1 * radius_multiplier
@@ -138,10 +187,9 @@ def calculateCurvaturesOnPoint(mesh, points, radius_multiplier=1.0):
 def calculateLocalDepth(mesh, seed_points=None):
     """
     Calculate the LocalDepth centered on a seed point (must be vertex indices) using mesh points in a fixed radius
-    :param mesh: Mesh Object
-    :param seed_points: an array of length N of mesh vertex indices
-    :param radius: float
-    :return:
+    @param mesh: Mesh Object
+    @param seed_points: an array of length N of mesh vertex indices
+    @return:
     """
 
     pca = PCA(n_components=3)
@@ -153,7 +201,7 @@ def calculateLocalDepth(mesh, seed_points=None):
         interval = range(len(mesh.vertices))
         seed_points = list(interval)
     for v_idx in interval:
-        neigh_vertices = mesh.verticesNeighbours((mesh.verticesNeighbours(mesh.adjacency_list[seed_points[v_idx]]))) # np.where(pairwise_distances(mesh.vertices, mesh.vertices[seed_points[v_idx]].reshape((1, -1)), metric="sqeuclidean") < pow(radius, 2))[0]
+        neigh_vertices = mesh.verticesNeighbours((mesh.verticesNeighbours(mesh.adjacency_list[seed_points[v_idx]])))  # np.where(pairwise_distances(mesh.vertices, mesh.vertices[seed_points[v_idx]].reshape((1, -1)), metric="sqeuclidean") < pow(radius, 2))[0]
         neigh_vertices = mesh.vertices[neigh_vertices]
         if len(neigh_vertices) > 5:
             mass_center = np.mean(neigh_vertices, axis=0)
@@ -172,10 +220,10 @@ def calculateLocalDepth(mesh, seed_points=None):
 def calculateArbitraryLocalDepth(mesh, seed_points, radius):
     """
     Calculate the LocalDepth centered on a seed point (that can be an arbitrary point in the mesh space) using mesh points in a fixed radius
-    :param mesh: Mesh Object
-    :param seed_points: a (nx3) array of 3D space points
-    :param radius: float
-    :return:
+    @param mesh: Mesh Object
+    @param seed_points: a (nx3) array of 3D space points
+    @param radius: float
+    @return:
     """
     radius = pow(radius, 2)
     pca = PCA(n_components=3)
@@ -193,19 +241,16 @@ def calculateArbitraryLocalDepth(mesh, seed_points, radius):
         component = pca.components_[2, :]
         vertexLD[v_idx] = np.abs(np.dot(seed_points[v_idx] - mass_center, component))
 
-    # Approccio alternativo: cerco il vertice della mesh più vicino e utilizzo i suoi vicini per il calcolo. DA FINIRE: gestire il caso in cui i vicini non sono abbastanza
-    # TODO DA FINIRE: gestire il caso in cui i vicini non sono abbastanza
-    # TODO chiedere quale approccio utilizzare
     return vertexLD
 
 
 def calculateFaceLocalDepth(mesh, faces, radius):
     """
     Calculate the LocalDepth of a mesh face. It is the mean of  Local Depths of face vertices.
-    :param mesh: Mesh Object
-    :param faces: a list or array of faces(a (nx3) array of point indices)
-    :param radius: float
-    :return:
+    @param mesh: Mesh Object
+    @param faces: a list or array of faces(a (nx3) array of point indices)
+    @param radius: float
+    @return:
     """
     seed_points, reverse_idx = np.unique(faces.flatten(), return_inverse=True)
     LD = calculateLocalDepth(mesh, seed_points, radius)

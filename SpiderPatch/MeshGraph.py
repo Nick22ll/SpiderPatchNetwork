@@ -11,13 +11,16 @@ import numpy as np
 
 
 class MeshGraph(dgl.DGLGraph):
-    def __init__(self, patches, neighbours_number=0, sample_id=None, mesh_id=None, resolution_level=None):
+    def __init__(self, patches, neighbours_number=0, sample_id=None, mesh_id=None, resolution_level=None, keep_feats_names=None):
         """
 
         @param patches: a list of Patch representing nodes of the MeshGraph
-        @param feats_names: list of names of features to extract from patches
+        @param keep_feats_names: list of names of features to extract from patches
         @param neighbours_number: number of Patches to consider neighbours (to generate the MeshGraph edges), leave "0" to make a fully connected graph
         """
+
+        if keep_feats_names is None:
+            keep_feats_names = patches[0].getNodeFeatsNames()
 
         self.patches = []
         self.sample_id = sample_id
@@ -27,8 +30,14 @@ class MeshGraph(dgl.DGLGraph):
         end_nodes = np.empty(0, dtype=int)
         seed_points = np.empty((0, 3))
 
+        feats_names_toremove = patches[0].getNodeFeatsNames()
+        for name in keep_feats_names:
+            feats_names_toremove.remove(name)
+
         for patch in patches:
             self.patches.append(deepcopy(patch))
+            for name in feats_names_toremove:
+                self.patches[-1].ndata.pop(name)
             seed_points = np.vstack((seed_points, patch.seed_point))
 
         # Calculate the MeshGraphs edges

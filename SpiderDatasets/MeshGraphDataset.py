@@ -47,14 +47,15 @@ class MeshGraphDataset(DGLDataset):
     def normalize(self, node_normalizers=None):
         """
         Normalizes node data of the graphs. The normalization process is applied per feature
-        :param node_normalizers: (dict) { "feat_name" : sklearn.preprocessing.Scaler}, a dict that map a feature to his normalizer. If None normalizers are calculated at runtime.
-        :return: node_normalizers: (dict) { "feat_name" : sklearn.preprocessing.Scaler}, a dict that map a feature to his normalizer used in the normalization process.
+        @param node_normalizers: (dict) { "feat_name" : sklearn.preprocessing.Scaler}, a dict that map a feature to his normalizer. If None normalizers are calculated at runtime.
+        @return: node_normalizers: (dict) { "feat_name" : sklearn.preprocessing.Scaler}, a dict that map a feature to his normalizer used in the normalization process.
         """
 
         if node_normalizers is None:
             node_normalizers = {}
             feats_names = self.graphs[0].patches[0].getNodeFeatsNames()
-            feats_names.remove("vertices")
+            if "vertices " in feats_names:
+                feats_names.remove("vertices")
             for feature in feats_names:
                 node_normalizers[feature] = MinMaxScaler((0, 1))
 
@@ -88,9 +89,9 @@ class MeshGraphDataset(DGLDataset):
     def load_from(self, load_path=None, dataset_name=None):
         """
         Load a MeshDataset instance from a pkl file.
-        :param load_path: (string) the path to the folder containing the dataset structure folder e.g. "Datasets/MeshGraphs/SHREC17_R10_R16_P6_Normalized".
-        :param dataset_name: (string) the name of the dataset file e.g. "SHREC17_R10_R16_P6_level_0_Normalized_test.pkl"
-        :return:
+        @param load_path: (string) the path to the folder containing the dataset structure folder e.g. "Datasets/MeshGraphs/SHREC17_R10_R16_P6_Normalized".
+        @param dataset_name: (string) the name of the dataset file e.g. "SHREC17_R10_R16_P6_level_0_Normalized_test"
+        @return:
         """
         if load_path is not None:
             path = f"{load_path}/{dataset_name}.pkl"
@@ -107,14 +108,17 @@ class MeshGraphDataset(DGLDataset):
         self.mesh_id = loaded_dataset.mesh_id
         self._name = dataset_name
 
-    def fromRawPatches(self, load_path, resolution_level="all", graph_for_mesh=10, patch_for_graph=10):
+    def fromRawPatches(self, load_path, resolution_level="all", graph_for_mesh=10, patch_for_graph=10, connection_number=0, feature_to_keep=None):
         """
         Generate a MeshGraphDataset from a PatchesDataset.
-        :param load_path: (string) the path to the Patches dataset folder structure.
-        :param resolution_level: (string) e.g. all, level_0, level_1, ecc... The resolution level of the mesh to use.
-        :param graph_for_mesh: (int) number of MeshGraph to generate per Mesh.
-        :param patch_for_graph: (int) number of Patch to use as nodes per MeshGraph
-        :return: self
+
+        @param load_path: (string) the path to the Patches dataset folder structure.
+        @param resolution_level: (string) e.g. all, level_0, level_1, ecc... The resolution level of the mesh to use.
+        @param graph_for_mesh: (int) number of MeshGraph to generate per Mesh.
+        @param patch_for_graph: (int) number of Patch to use as nodes per MeshGraph
+        @param connection_number: (int) number of neighbours per patch, leave zero for a fully connected graph
+        @param feature_to_keep: (list) A list of node features keys to keep, if None keep all features
+        @return: self
         """
 
         print(f"Loading MeshGraph Dataset from: {load_path}")
@@ -125,30 +129,73 @@ class MeshGraphDataset(DGLDataset):
         self.sample_id = []
         self.mesh_id = []
         if resolution_level != "all":
-            for sample_id in tqdm(os.listdir(f"{load_path}"), position=0, desc=f"Mesh Class Loading: ", colour="white", ncols=80):
-                for label in os.listdir(f"{load_path}/{sample_id}/{resolution_level}"):
-                    for patches_filename in os.listdir(f"{load_path}/{sample_id}/{resolution_level}/{label}"):
-                        with open(f"{load_path}/{sample_id}/{resolution_level}/{label}/{patches_filename}", "rb") as pkl_file:
+            for label in tqdm(os.listdir(f"{load_path}"), position=0, desc=f"Mesh Class Loading: ", colour="white", ncols=80):
+                for sample_id in os.listdir(f"{load_path}/{label}"):
+                    patches_filename = os.listdir(f"{load_path}/{label}/{sample_id}/resolution_{resolution_level}")[0]
+                    with open(f"{load_path}/{label}/{sample_id}/resolution_{resolution_level}/{patches_filename}", "rb") as pkl_file:
+                        gc.disable()
+                        patches = pkl.load(pkl_file)
+                        gc.enable()
+                        for _ in range(graph_for_mesh):
+                            mesh_id = [int(s) for s in re.findall(r'\d+', patches_filename)]
+                            self.graphs.append(
+                                MeshGraph(random.sample(patches, patch_for_graph), sample_id=int(sample_id.removeprefix("id_")), mesh_id=int(mesh_id[0]), resolution_level=resolution_level.removeprefix("resolution_"), neighbours_number=connection_number, keep_feats_names=feature_to_keep))
+                            self.labels.append(int(label.removeprefix("class_")))
+                            self.sample_id.append(int(sample_id.removeprefix("id_")))
+                            self.mesh_id.extend(mesh_id)
+        else:
+            for label in tqdm(os.listdir(f"{load_path}"), position=0, desc=f"Mesh Class Loading: ", colour="white", ncols=80):
+                for sample_id in tqdm(os.listdir(f"{load_path}/{label}"), position=1, desc=f"Sample loading: ", colour="white", ncols=80, leave=False):
+                    for resolution_level in os.listdir(f"{load_path}/{label}/{sample_id}"):
+                        patches_filename = os.listdir(f"{load_path}/{label}/{sample_id}/{resolution_level}")[0]
+                        with open(f"{load_path}/{label}/{sample_id}/{resolution_level}/{patches_filename}", "rb") as pkl_file:
+                            gc.disable()
                             patches = pkl.load(pkl_file)
+                            gc.enable()
                             for _ in range(graph_for_mesh):
                                 mesh_id = [int(s) for s in re.findall(r'\d+', patches_filename)]
-                                self.graphs.append(MeshGraph(random.sample(patches, patch_for_graph), sample_id=sample_id, mesh_id=mesh_id[0], resolution_level=resolution_level))
-                                self.labels.append(int(label))
-                                self.sample_id.append(int(sample_id))
+                                self.graphs.append(
+                                    MeshGraph(random.sample(patches, patch_for_graph), sample_id=int(sample_id.removeprefix("id_")), mesh_id=int(mesh_id[0]), resolution_level=resolution_level.removeprefix("resolution_"), neighbours_number=connection_number, keep_feats_names=feature_to_keep))
+                                self.labels.append(int(label.removeprefix("class_")))
+                                self.sample_id.append(int(sample_id.removeprefix("id_")))
                                 self.mesh_id.extend(mesh_id)
-        else:
-            for sample_id in tqdm(os.listdir(f"{load_path}"), position=0, desc=f"Loading Sample: ", colour="white", ncols=80):
-                for resolution_level in os.listdir(f"{load_path}/{sample_id}"):
-                    for label in os.listdir(f"{load_path}/{sample_id}/{resolution_level}"):
-                        for patches_filename in os.listdir(f"{load_path}/{sample_id}/{resolution_level}/{label}"):
-                            with open(f"{load_path}/{sample_id}/{resolution_level}/{label}/{patches_filename}", "rb") as pkl_file:
-                                patches = pkl.load(pkl_file)
-                                for _ in range(graph_for_mesh):
-                                    mesh_id = [int(s) for s in re.findall(r'\d+', patches_filename)]
-                                    self.graphs.append(MeshGraph(random.sample(patches, patch_for_graph), sample_id=int(sample_id), mesh_id=mesh_id[0], resolution_level=resolution_level))
-                                    self.labels.append(int(label))
-                                    self.sample_id.append(int(sample_id))
-                                    self.mesh_id.extend(mesh_id)
+
+        super().__init__(name=self.name)
+        return self
+
+    def fromRawSuperPatches(self, load_path, graph_for_mesh=10, patch_for_graph=10, connection_number=0, feature_to_keep=None):
+        """
+        Generate a MeshGraphDataset from a PatchesDataset.
+
+        @param load_path: (string) the path to the Patches dataset folder structure.
+        @param resolution_level: (string) e.g. all, level_0, level_1, ecc... The resolution level of the mesh to use.
+        @param graph_for_mesh: (int) number of MeshGraph to generate per Mesh.
+        @param patch_for_graph: (int) number of Patch to use as nodes per MeshGraph
+        @param connection_number: (int) number of neighbours per patch, leave zero for a fully connected graph
+        @param feature_to_keep: (list) A list of node features keys to keep, if None keep all features
+        @return: self
+        """
+
+        print(f"Loading MeshGraph Dataset from: {load_path}")
+        import re
+        random.seed(22)
+        self.graphs = []
+        self.labels = []
+        self.sample_id = []
+        self.mesh_id = []
+        for label in tqdm(os.listdir(f"{load_path}"), position=0, desc=f"Mesh Class Loading: ", colour="white", ncols=80):
+            for sample_id in tqdm(os.listdir(f"{load_path}/{label}"), position=1, desc=f"Sample loading: ", colour="white", ncols=80, leave=False):
+                patches_filename = os.listdir(f"{load_path}/{label}/{sample_id}")[0]
+                with open(f"{load_path}/{label}/{sample_id}/{patches_filename}", "rb") as pkl_file:
+                    gc.disable()
+                    patches = pkl.load(pkl_file)
+                    gc.enable()
+                    for _ in range(graph_for_mesh):
+                        mesh_id = [int(s) for s in re.findall(r'\d+', patches_filename)]
+                        self.graphs.append(MeshGraph(random.sample(patches, patch_for_graph), sample_id=int(sample_id.removeprefix("id_")), mesh_id=int(mesh_id[0]), neighbours_number=connection_number, keep_feats_names=feature_to_keep))
+                        self.labels.append(int(label.removeprefix("class_")))
+                        self.sample_id.append(int(sample_id.removeprefix("id_")))
+                        self.mesh_id.extend(mesh_id)
 
         super().__init__(name=self.name)
         return self

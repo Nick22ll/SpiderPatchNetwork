@@ -3,6 +3,8 @@ import open3d as o3d
 import trimesh
 from trimesh import caching
 from MeshCurvatures import *
+import matplotlib.cm as cm
+import matplotlib.colors as colors
 
 
 class Mesh:
@@ -42,13 +44,13 @@ class Mesh:
         self.computeEdges()
         self.edge_length = self.averageEdgeLength()
 
-    def computeCurvatures(self):
-        self.vertex_curvatures, self.face_curvatures = getCurvatures(self)
+    def computeCurvatures(self, radius):
+        self.vertex_curvatures, self.face_curvatures = getCurvatures(self, radius)
 
     def computeEdges(self):
         """
         Calculates edges of every mesh triangle (face)
-        :return edges: an array with dimensions (num_edges, 2), it is an array of mesh vertex indices
+        @return edges: an array with dimensions (num_edges, 2), it is an array of mesh vertex indices
         """
         first_edges = self.faces[:, [0, 1]]
         second_edges = self.faces[:, [1, 2]]
@@ -104,8 +106,8 @@ class Mesh:
     def getBoundaryVertices(self, neighbors_level=0):
         """
         Return the list of boundary vertices (those vertices that belongs to an edge tha is adjacent to a single triangle)
-        :param neighbors_level: parameter that consider boundary vertices also the n-level neighbors of a real boundary vertex
-        :return:
+        @param neighbors_level: parameter that consider boundary vertices also the n-level neighbors of a real boundary vertex
+        @return:
         """
         boundary_edges = self.edgesUsedTimes(1)
         boundary_vertices = np.unique(boundary_edges.reshape((-1, 1)))
@@ -116,19 +118,17 @@ class Mesh:
     def draw(self):
         o3d.visualization.draw_geometries([self.mesh], mesh_show_back_face=True)
 
-    def draw_with_rings(self, rings):
-        import matplotlib.cm
-        points = np.empty((0, 3))
-        colors = np.empty((0, 3))
+    def draw_with_rings(self, concRing):
+        points = concRing.seed_point.reshape((1, 3))
         faces = np.empty(0, dtype=int)
-        cmap = matplotlib.cm.get_cmap()
-
-        for ring_idx in range(len(rings.rings)):
-            points = np.concatenate((points, rings.rings[ring_idx].points))
-            faces = np.append(faces, rings.rings[ring_idx].faces)
-            n_points = len(rings.rings[ring_idx].points) - 1
-            for point_idx in range(len(rings.rings[ring_idx].points)):
-                colors = np.vstack((colors, np.array(cmap(point_idx / n_points)[0:3])))
+        norm = colors.Normalize(vmin=0, vmax=len(concRing.rings), clip=True)
+        color_map = cm.ScalarMappable(norm=norm, cmap=cm.get_cmap('plasma'))
+        color_points = np.empty((0, 3))
+        for ring_idx in range(len(concRing.rings)):
+            points = np.concatenate((points, concRing.rings[ring_idx].points))
+            faces = np.append(faces, concRing.rings[ring_idx].faces)
+            for point_idx in range(len(concRing.rings[ring_idx].points)):
+                color_points = np.vstack((color_points, np.array(color_map.to_rgba(ring_idx)[0:3])))
         faces = faces[np.where(faces != -1)[0]]
         faces = np.unique(self.faces[faces].reshape(-1, 1))
 
@@ -137,7 +137,7 @@ class Mesh:
             self.mesh.vertex_colors[f] = np.array([0.9, 0.5, 0])
         points = o3d.utility.Vector3dVector(points)
         cloud = o3d.geometry.PointCloud(points)
-        cloud.colors = o3d.utility.Vector3dVector(colors)
+        cloud.colors = o3d.utility.Vector3dVector(color_points)
         o3d.visualization.draw_geometries([self.mesh, cloud], mesh_show_back_face=True)
 
     def draw_faces(self, indices, color=np.array([1, 0, 0])):
@@ -152,6 +152,10 @@ class Mesh:
         cloud = o3d.geometry.PointCloud(points)
         o3d.visualization.draw_geometries([self.mesh, cloud], mesh_show_back_face=True)
 
+    def drawWithMesh(self, mesh):
+        mesh.mesh.paint_uniform_color([1, 0.706, 0])
+        o3d.visualization.draw_geometries([self.mesh, mesh.mesh], mesh_show_back_face=True)
+
     def draw_with_patches(self, patches):
         for_draw_patches = []
         for patch in patches:
@@ -164,11 +168,57 @@ class Mesh:
             for_draw_patches.extend(patch.to_draw())
         o3d.visualization.draw_geometries([self.mesh] + for_draw_patches, mesh_show_back_face=True)
 
+    def drawWithLD(self, radius):
+        if not self.has_curvatures():
+            self.computeCurvatures(radius)
+        vmin = np.min(self.vertex_curvatures["local_depth"])
+        vmax = np.max(self.vertex_curvatures["local_depth"])
+        norm = colors.Normalize(vmin=vmin, vmax=vmax)
+        color_map = cm.ScalarMappable(norm=norm, cmap=cm.get_cmap('plasma'))
+
+        rgbs = color_map.to_rgba(self.vertex_curvatures["local_depth"])[:, :3]
+        self.mesh.vertex_colors = o3d.utility.Vector3dVector(rgbs)
+        o3d.visualization.draw_geometries([self.mesh], mesh_show_back_face=True)
+
+    def drawWithGaussCurv(self, radius):
+        if not self.has_curvatures():
+            self.computeCurvatures(radius=radius)
+        curv = self.vertex_curvatures["gauss_curvature"]
+        mean = np.mean(curv)
+        norm = colors.Normalize(vmin=mean - 0.05, vmax=mean + 0.05, clip=True)
+        color_map = cm.ScalarMappable(norm=norm, cmap=cm.get_cmap('plasma'))
+        rgbs = color_map.to_rgba(curv)[:, :3]
+        self.mesh.vertex_colors = o3d.utility.Vector3dVector(rgbs)
+        o3d.visualization.draw_geometries([self.mesh], mesh_show_back_face=True)
+
+    def drawWithMeanCurv(self, radius):
+        if not self.has_curvatures():
+            self.computeCurvatures(radius)
+
+        curv = self.vertex_curvatures["mean_curvature"]
+        mean = np.mean(curv)
+        norm = colors.Normalize(vmin=mean - 0.05, vmax=mean + 0.05, clip=True)
+        color_map = cm.ScalarMappable(norm=norm, cmap=cm.get_cmap('plasma'))
+        rgbs = color_map.to_rgba(curv)[:, :3]
+        self.mesh.vertex_colors = o3d.utility.Vector3dVector(rgbs)
+        o3d.visualization.draw_geometries([self.mesh], mesh_show_back_face=True)
+
+    def drawWithK2(self, radius):
+        if not self.has_curvatures():
+            self.computeCurvatures(radius)
+        curv = self.vertex_curvatures["K2"]
+        mean = np.mean(curv)
+        norm = colors.Normalize(vmin=mean - 0.05, vmax=mean + 0.05, clip=True)
+        color_map = cm.ScalarMappable(norm=norm, cmap=cm.get_cmap('plasma'))
+        rgbs = color_map.to_rgba(curv)[:, :3]
+        self.mesh.vertex_colors = o3d.utility.Vector3dVector(rgbs)
+        o3d.visualization.draw_geometries([self.mesh], mesh_show_back_face=True)
+
     def load(self, mesh_path):
         """
-        Load a mesh. Format avaiable: .inp), ANSYS msh (.msh), AVS-UCD (.avs), CGNS (.cgns), DOLFIN XML (.xml), Exodus (.e, .exo), FLAC3D (.f3grid), H5M (.h5m), Kratos/MDPA (.mdpa), Medit (.mesh, .meshb), MED/Salome (.med), Nastran (bulk data, .bdf, .fem, .nas), Netgen (.vol, .vol.gz), Neuroglancer precomputed format, Gmsh (format versions 2.2, 4.0, and 4.1, .msh), OBJ (.obj), OFF (.off), PERMAS (.post, .post.gz, .dato, .dato.gz), PLY (.ply), STL (.stl), Tecplot .dat, TetGen .node/.ele, SVG (2D output only) (.svg), SU2 (.su2), UGRID (.ugrid), VTK (.vtk), VTU (.vtu), WKT (TIN) (.wkt), XDMF (.xdmf, .xmf).
-        :param mesh_path: the path of the mesh to load
-        :return: None
+        Load a mesh. Format available: .inp), ANSYS msh (.msh), AVS-UCD (.avs), CGNS (.cgns), DOLFIN XML (.xml), Exodus (.e, .exo), FLAC3D (.f3grid), H5M (.h5m), Kratos/MDPA (.mdpa), Medit (.mesh, .meshb), MED/Salome (.med), Nastran (bulk data, .bdf, .fem, .nas), Netgen (.vol, .vol.gz), Neuroglancer precomputed format, Gmsh (format versions 2.2, 4.0, and 4.1, .msh), OBJ (.obj), OFF (.off), PERMAS (.post, .post.gz, .dato, .dato.gz), PLY (.ply), STL (.stl), Tecplot .dat, TetGen .node/.ele, SVG (2D output only) (.svg), SU2 (.su2), UGRID (.ugrid), VTK (.vtk), VTU (.vtu), WKT (TIN) (.wkt), XDMF (.xdmf, .xmf).
+        @param mesh_path: the path of the mesh to load
+        @return: None
         """
         self.mesh = o3d.io.read_triangle_mesh(mesh_path)
         self.computeDataStructures()
@@ -177,8 +227,8 @@ class Mesh:
     def save(self, path):
         """
         Save a mesh.
-        :param path: the path with filename and extension (ex. C:/user/file/mesh_filename.off )
-        :return: None
+        @param path: the path with filename and extension (ex. C:/user/file/mesh_filename.off )
+        @return: None
         """
         o3d.io.write_triangle_mesh(path, self.mesh)
         print(f"Mesh saved at: {path}")
@@ -196,9 +246,9 @@ class Mesh:
 def expandFacet(facet, mesh):
     """
     Expands the facet with all the neighbour faces of the facet
-    :param facet: N indices representing the facet to expand
-    :param mesh: Mesh object
-    :return: a list of face indices representing the expanded facet
+    @param facet: N indices representing the facet to expand
+    @param mesh: Mesh object
+    @return: a list of face indices representing the expanded facet
     """
     if not isinstance(facet, list) and not isinstance(facet, np.ndarray):
         return np.array(mesh.face_adjacency_list[facet])
@@ -231,8 +281,8 @@ class Meshv2(Trimesh):
     def getBoundaryVertices(self, neighbors_level=0):
         """
         Return the list of boundary vertices (those vertices that belongs to an edge tha is adjacent to a single triangle)
-        :param neighbors_level: parameter that consider boundary vertices also the n-level neighbors of a real boundary vertex
-        :return:
+        @param neighbors_level: parameter that consider boundary vertices also the n-level neighbors of a real boundary vertex
+        @return:
         """
         prova = self.edgesUsedTimes(1).reshape((-1, 1))
         boundary_vertices = np.unique(prova)
@@ -253,15 +303,15 @@ class Meshv2(Trimesh):
 
     def neighbourFacesIdx(self, face_idx):
         """
-        :param face_idx: index of the face to retrieve neighbours
-        :return: list of indices of neighbours
+        @param face_idx: index of the face to retrieve neighbours
+        @return: list of indices of neighbours
         """
         return self.face_adjacency_list[face_idx]
 
     def neighbourFaces(self, face_idx):
         """
-        :param face_idx: index of the face to retrieve neighbours or (1x3) array representing a face
-        :return: neighbours faces
+        @param face_idx: index of the face to retrieve neighbours or (1x3) array representing a face
+        @return: neighbours faces
         """
         if face_idx.ndim > 1:
             face_idx = np.where(self.faces == face_idx)[0]
@@ -318,9 +368,9 @@ def loadMeshv2(path):
 def expandFacetv2(facet, mesh):
     """
     Expands the facet with all the neighbour faces of the facet
-    :param facet: N indices representing the facet to expand
-    :param mesh: Mesh object
-    :return: a list of face indices representing the expanded facet
+    @param facet: N indices representing the facet to expand
+    @param mesh: Mesh object
+    @return: a list of face indices representing the expanded facet
     """
     if facet.ndim < 1:
         facet = [facet]

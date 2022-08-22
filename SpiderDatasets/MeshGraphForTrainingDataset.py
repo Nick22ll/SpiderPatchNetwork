@@ -98,11 +98,11 @@ class MeshGraphDatasetForNNTraining:
 
     def numClasses(self, partition="all"):
         """
-        :param partition: a string to select the partition dataset to transfer to device: "all" - all the dataset
+        @param partition: a string to select the partition dataset to transfer to device: "all" - all the dataset
                                                                                             "train" - train dataset
                                                                                             "val" - validation dataset
                                                                                             "test" - test dataset
-        :return:
+        @return:
         """
         if partition == "all":
             return len(torch.unique(torch.hstack((self.train_dataset.labels, self.validation_dataset.labels, self.test_dataset.labels))))
@@ -117,12 +117,12 @@ class MeshGraphDatasetForNNTraining:
 
     def to(self, device, partition="all"):
         """
-        :param device:
-        :param partition: a string to select the partition dataset to transfer to device: "all" - all the dataset
+        @param device:
+        @param partition: a string to select the partition dataset to transfer to device: "all" - all the dataset
                                                                                             "train" - train dataset
                                                                                             "val" - validation dataset
                                                                                             "test" - test dataset
-        :return: None
+        @return: None
         """
         if partition == "train" or partition == "all":
             self.train_dataset.to(device)
@@ -133,8 +133,8 @@ class MeshGraphDatasetForNNTraining:
 
     def aggregateNodeFeatures(self, feat_names=None):
         """
-        :param feat_names: list of features key to aggregate in a single feature (called aggregate_feature)
-        :return: the aggregate feature shape along axis 1 ( if shape 30x4 --> returns 4 )
+        @param feat_names: list of features key to aggregate in a single feature (called aggregate_feature)
+        @return: the aggregate feature shape along axis 1 ( if shape 30x4 --> returns 4 )
         """
         if feat_names is None:
             feat_names = self.getPatchNodeFeatsNames()
@@ -157,8 +157,8 @@ class MeshGraphDatasetForNNTraining:
 
     def aggregateEdgeFeatures(self, feat_names="all"):
         """
-        :param feat_names: list of features key to aggregate in a single feature (called aggregate_feature)
-        :return: the aggregate feature shape along axis 1 ( if shape 30x4 --> returns 4 )
+        @param feat_names: list of features key to aggregate in a single feature (called aggregate_feature)
+        @return: the aggregate feature shape along axis 1 ( if shape 30x4 --> returns 4 )
         """
         if feat_names == "all":
             feat_names = self.getPatchEdgeFeatsNames()
@@ -189,7 +189,7 @@ class MeshGraphDatasetForNNTraining:
     def normalize(self):
         """
         Normalizes the training and validation datasets using their values and stores the normalizers for later use.
-        :return: (dict) e.g. { "feat_name":sklearn.preprocessing.Scaler }, the normalizers calculated in the process.
+        @return: (dict) e.g. { "feat_name":sklearn.preprocessing.Scaler }, the normalizers calculated in the process.
         """
         self.name = self.name + "_Normalized"
         self.normalizers = self.train_dataset.normalize()
@@ -198,7 +198,7 @@ class MeshGraphDatasetForNNTraining:
     def normalize_test_dataset(self):
         """
         Uses the normalizers in self.normalizers to normalize the test dataset.
-        :return:
+        @return:
         """
         if self.normalizers is not None:
             self.test_dataset.normalize(self.normalizers)
@@ -206,7 +206,7 @@ class MeshGraphDatasetForNNTraining:
     def normalize_validation_dataset(self):
         """
         Uses the normalizers in self.normalizers to normalize the test dataset.
-        :return:
+        @return:
         """
         if self.normalizers is not None:
             self.validation_dataset.normalize(self.normalizers)
@@ -232,12 +232,12 @@ class MeshGraphDatasetForNNTraining:
     def load(self, path, name, train_name=None, validation_name=None, test_name=None):
         """
         Loads a MeshGraphDatasetForNNTraining instance from a dataset structured folder
-        :param path: (string) The path to the dataset folder.
-        :param name: (string) The base name of the dataset that follow the standard.
-        :param train_name: (string) Use it if the training dataset doesn't follow the standard name system.
-        :param validation_name:(string) Use it if the validation dataset doesn't follow the standard name system.
-        :param test_name:(string) Use it if the test dataset doesn't follow the standard name system.
-        :return:
+        @param path: (string) The path to the dataset folder.
+        @param name: (string) The base name of the dataset that follow the standard.
+        @param train_name: (string) Use it if the training dataset doesn't follow the standard name system.
+        @param validation_name:(string) Use it if the validation dataset doesn't follow the standard name system.
+        @param test_name:(string) Use it if the test dataset doesn't follow the standard name system.
+        @return:
         """
         self.train_dataset = MeshGraphDataset()
         self.validation_dataset = MeshGraphDataset()
@@ -265,9 +265,9 @@ class MeshGraphDatasetForNNTraining:
     def loadFromMeshGraphDataset(self, dataset_path, dataset_name):
         """
         Loads a MeshGraphDatasetForNNTraining from a MeshGraphDataset file.
-        :param dataset_path: (string) The path to the folder containing the dataset file.
-        :param dataset_name: (string) The dataset file name.
-        :return:
+        @param dataset_path: (string) The path to the folder containing the dataset file.
+        @param dataset_name: (string) The dataset file name.
+        @return:
         """
         dataset = MeshGraphDataset()
         dataset.load_from(dataset_path, dataset_name)

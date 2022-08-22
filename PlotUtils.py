@@ -11,7 +11,7 @@ from matplotlib.lines import Line2D
 from sklearn.manifold import TSNE
 
 from SpiderDatasets.MeshGraphForTrainingDataset import MeshGraphDatasetForNNTraining
-from SpiderPatch.Networks import MeshNetwork
+from SpiderPatch.CONVNetworks import MeshNetwork
 
 
 def plot_confusion_matrix(cm, target_names=None, cmap=None):

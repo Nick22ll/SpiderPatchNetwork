@@ -5,12 +5,19 @@ class ConcentricRings:
     def __init__(self, *args):
         if len(args) == 0:
             self.seed_point = None
+            self.seed_point_face = None
             self.rings = []
         elif len(args) == 1 and isinstance(args[0], Ring):
             self.seed_point = None
+            self.seed_point_face = None
             self.rings = [args[0]]
         elif len(args) == 1 and isinstance(args[0], np.ndarray):
             self.rings = []
+            self.seed_point_face = None
+            self.seed_point = args[0]
+        elif len(args) == 2 and isinstance(args[0], np.ndarray) and isinstance(args[1], int):
+            self.rings = []
+            self.seed_point_face = args[1]
             self.seed_point = args[0]
 
     def __getitem__(self, *args):
@@ -33,13 +40,13 @@ class ConcentricRings:
         return None
 
     def getNonNaNFacesIdx(self):
-        indices = []
+        indices = [self.seed_point_face]
         for ring in self.rings:
-            indices.extend(ring.faces[ring.getNonNan()])
+            indices.extend(ring.faces[ring.getNonNan()].flatten().tolist())
         return indices
 
     def getNonNaNPoints(self):
-        points = np.empty((0, 3))
+        points = self.seed_point.reshape((1, 3))
         for ring in self.rings:
             points = np.vstack((points, ring.points[ring.getNonNan()]))
         return points
@@ -63,7 +70,7 @@ class ConcentricRings:
 
     def getElementsNumber(self):
         """
-        :return: number of elements in a ring
+        @return: number of elements in a ring
         """
         if self.rings:
             elements = 0
