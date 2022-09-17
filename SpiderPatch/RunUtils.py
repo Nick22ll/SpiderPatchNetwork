@@ -64,7 +64,7 @@ class RunManager:
         run_duration = time.time() - self.run_start_time
 
         loss = self.epoch_loss / len(self.loader)
-        accuracy = self.epoch_num_correct / len(self.loader.dataloader.dataset)
+        accuracy = self.epoch_num_correct / len(self.loader.dataloader.test_dataset)
 
         self.tb.add_scalar('Loss', loss, self.epoch_count)
         self.tb.add_scalar('Accuracy', accuracy, self.epoch_count)

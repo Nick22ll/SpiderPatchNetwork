@@ -1,6 +1,7 @@
 import warnings
 
 import torch
+from sklearn.metrics import pairwise_distances
 
 from GeometricUtils import faceArea, LRF
 import open3d as o3d
@@ -10,7 +11,7 @@ import networkx as nx
 import numpy as np
 
 
-class Patch(dgl.DGLGraph):
+class SpiderPatch(dgl.DGLGraph):
     def __init__(self, concentricRings, mesh, seed_point):
         """
         Constructs a Patch object (that it is a bidirectional DGLGraph object) from a ConcentricRings object following a spyder pattern
@@ -23,7 +24,6 @@ class Patch(dgl.DGLGraph):
         start_nodes = np.empty(0, dtype=int)
         end_nodes = np.empty(0, dtype=int)
         first_ring_nodes_id = np.empty(0, dtype=int)
-        mesh_surface = mesh.mesh.get_surface_area()
         current_node = -1
         node_distances = np.empty(0)
         for ring in range(concentricRings.getRingsNumber()):
@@ -70,24 +70,20 @@ class Patch(dgl.DGLGraph):
         # Calculate NODE features
         node_features = {}
 
-        node_features["vertices"] = np.array(self.seed_point)
-        node_features["vertices"] = np.vstack((node_features["vertices"], concentricRings.getNonNaNPoints()))
+        node_features["vertices"] = concentricRings.getNonNaNPoints()
+        node_features["weight"] = 1 - pairwise_distances(node_features["vertices"], self.seed_point.reshape((1, 3)), metric="euclidean", force_all_finite="allow-nan")
 
         mesh_face_idx = concentricRings.getNonNaNFacesIdx()
 
-        node_features["v_normals"] = np.mean(mesh.vertex_normals()[mesh.faces[mesh.vertex_faces[seed_point]]].reshape((-1, 9)), axis=0)
-        node_features["v_normals"] = np.vstack((node_features["v_normals"], mesh.vertex_normals()[mesh.faces[mesh_face_idx]].reshape((-1, 9))))
+        # node_features["f_normal"] = mesh.face_normals[mesh_face_idx]
 
-        node_features["f_normal"] = np.mean(mesh.faces_normals()[mesh.vertex_faces[seed_point]], axis=0)
-        node_features["f_normal"] = np.vstack(([node_features["f_normal"]], mesh.faces_normals()[mesh_face_idx]))
-
-        node_features["surf_area_ratio"] = np.mean(faceArea(mesh, mesh.vertex_faces[seed_point]) / mesh_surface)
-        node_features["surf_area_ratio"] = np.vstack(([node_features["surf_area_ratio"]], faceArea(mesh, mesh_face_idx).reshape((-1, 1)) / mesh_surface))
-
-        # G, H = calculateLocalCurvatures(mesh, concentricRings.getNonNaNPoints())
+        if not mesh.has_curvatures():
+            raise RuntimeError("Mesh  doesn't have computed curvatures!")
         for curvature in ["gauss_curvature", "mean_curvature", "curvedness", "K2", "local_depth"]:
-            node_features[curvature] = np.mean(mesh.face_curvatures[curvature][mesh.vertex_faces[seed_point]])
-            node_features[curvature] = np.vstack(([node_features[curvature]], mesh.face_curvatures[curvature][mesh_face_idx].reshape((-1, 1))))
+            node_features[curvature] = mesh.face_curvatures[0][curvature][mesh_face_idx].reshape((-1, 1))
+            for radius_level in range(1, 5):
+                tmp_curvature = mesh.face_curvatures[radius_level][curvature][mesh_face_idx].reshape((-1, 1))
+                node_features[curvature] = np.hstack((node_features[curvature], tmp_curvature))
 
         # Calculate EDGE features
         edge_features = {}
@@ -127,7 +123,7 @@ class Patch(dgl.DGLGraph):
         return list(self.edata.keys())
 
 
-class PatchLRF(dgl.DGLGraph):
+class SpiderPatchLRF(dgl.DGLGraph):
     def __init__(self, concentricRings, mesh, seed_point, lrf_radius):
         """
         Constructs a Patch object (that it is a bidirectional DGLGraph object) from a ConcentricRings object following a spyder pattern
@@ -146,7 +142,6 @@ class PatchLRF(dgl.DGLGraph):
         start_nodes = np.empty(0, dtype=int)
         end_nodes = np.empty(0, dtype=int)
         first_ring_nodes_id = np.empty(0, dtype=int)
-        mesh_surface = mesh.mesh.get_surface_area()
         current_node = -1
         node_distances = np.empty(0)
         for ring in range(concentricRings.getRingsNumber()):
@@ -193,21 +188,16 @@ class PatchLRF(dgl.DGLGraph):
         # Calculate NODE features
         node_features = {}
 
-        node_features["vertices"] = np.array(self.seed_point)
-        node_features["vertices"] = np.vstack((node_features["vertices"], concentricRings.getNonNaNPoints()))
+        node_features["vertices"] = concentricRings.getNonNaNPoints()
 
         mesh_face_idx = concentricRings.getNonNaNFacesIdx()
 
-        node_features["v_normals"] = np.mean(mesh.vertex_normals()[mesh.faces[mesh.vertex_faces[seed_point]]].dot(mat_transform.T).reshape((-1, 9)), axis=0)
-        node_features["v_normals"] = np.vstack((node_features["v_normals"], mesh.vertex_normals()[mesh.faces[mesh_face_idx]].dot(mat_transform.T).reshape((-1, 9))))
+        node_features["f_normal"] = mesh.face_normals[mesh_face_idx].dot(mat_transform.T)
 
-        node_features["f_normal"] = np.mean(mesh.faces_normals()[mesh.vertex_faces[seed_point]].dot(mat_transform.T), axis=0)
-        node_features["f_normal"] = np.vstack(([node_features["f_normal"]], mesh.faces_normals()[mesh_face_idx].dot(mat_transform.T)))
-
-        # G, H = calculateLocalCurvatures(mesh, concentricRings.getNonNaNPoints())
+        if not mesh.has_curvatures():
+            mesh.computeCurvatures(7)
         for curvature in ["gauss_curvature", "mean_curvature", "curvedness", "K2", "local_depth"]:
-            node_features[curvature] = np.mean(mesh.face_curvatures[curvature][mesh.vertex_faces[seed_point]])
-            node_features[curvature] = np.vstack(([node_features[curvature]], mesh.face_curvatures[curvature][mesh_face_idx].reshape((-1, 1))))
+            node_features[curvature] = mesh.face_curvatures[2][curvature][mesh_face_idx].reshape((-1, 1))
 
         # Calculate EDGE features
         edge_features = {}

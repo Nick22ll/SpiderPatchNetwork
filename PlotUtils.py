@@ -10,8 +10,9 @@ from dgl.dataloading import GraphDataLoader
 from matplotlib.lines import Line2D
 from sklearn.manifold import TSNE
 
+from Networks.CONVNetworks import MeshNetwork
 from SpiderDatasets.MeshGraphForTrainingDataset import MeshGraphDatasetForNNTraining
-from SpiderPatch.CONVNetworks import MeshNetwork
+
 
 
 def plot_confusion_matrix(cm, target_names=None, cmap=None):
@@ -98,10 +99,10 @@ def plot_grad_flow(named_parameters):
     plt.show()
 
 
-def plot_training_statistics(filename, epochs, losses, val_accuracies, val_losses, title="Training Statistics"):
+def plot_training_statistics(filename, epochs, losses, val_epochs, val_accuracies, val_losses, title="Training Statistics"):
     plt.plot(epochs, losses, 'sienna', label='Training Loss')
-    plt.plot(epochs, val_accuracies, 'steelblue', label='Validation Accuracy')
-    plt.plot(epochs, val_losses, 'cyan', label='Validation Loss')
+    plt.plot(val_epochs, val_accuracies, 'steelblue', label='Validation Accuracy')
+    plt.plot(val_epochs, val_losses, 'cyan', label='Validation Loss')
     plt.title(title)
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
@@ -159,69 +160,6 @@ def plot_embeddings_statistics(paths, id, title="", labels=None):
     # Put a legend below current axis
     ax.legend(legend, labels, loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=2)
     plt.show()
-
-
-def plot_model_parameters_comparison(paths):
-    import matplotlib.colors as mcolors
-    representations = ["mean", "max", "min"]
-
-    state_dicts = []
-    labels = []
-    for path in paths:
-        model = MeshNetwork()
-        model.load(path)
-        state_dicts.append(model.state_dict())
-        labels.append(path.split("/")[-3])
-    SMALL_SIZE = 4
-    MEDIUM_SIZE = 6
-    BIGGER_SIZE = 12
-
-    fig = plt.figure(figsize=(12.8, 7.2), dpi=300)
-    axs = fig.subplots(len(state_dicts[0]), len(representations), sharex="none", sharey="none")
-    plt.rc('font', size=SMALL_SIZE)  # controls default text sizes
-    plt.rc('axes', titlesize=MEDIUM_SIZE)  # fontsize of the axes title
-    plt.rc('axes', labelsize=MEDIUM_SIZE)  # fontsize of the x and y labels
-    plt.rc('xtick', labelsize=SMALL_SIZE)  # fontsize of the tick labels
-    plt.rc('ytick', labelsize=SMALL_SIZE)  # fontsize of the tick labels
-    plt.rc('legend', fontsize=BIGGER_SIZE)  # legend fontsize
-    plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
-    legend = [0] * len(state_dicts)
-    for layer_id in range(len(list(state_dicts[0].keys()))):
-        for repr_id in range(len(representations)):
-            weights = []
-            layer = list(state_dicts[0].keys())[layer_id]
-            repr_method = getattr(np, representations[repr_id])
-            for state_dict in state_dicts:
-                weights.append(repr_method(state_dict[layer].numpy(), axis=0))
-            weights = np.array(weights)
-
-            asort = np.argsort(weights, axis=0)
-            sort = np.sort(weights, axis=0)
-            cmap = matplotlib.colors.ListedColormap(mcolors.TABLEAU_COLORS.keys())
-            for i in range(weights.shape[0] - 1, -1, -1):
-                for j in range(weights.shape[1]):
-                    legend[i] = axs[layer_id, repr_id].bar(j, sort[i, j], width=0.8, color=cmap(asort[i, j]))
-            axs[layer_id, repr_id].set_title(f"{representations[repr_id]}")
-
-    layer_id = 0
-    for ax in axs.flat:
-        ax.tick_params(axis='both', which='major', labelsize=SMALL_SIZE)
-        ax.tick_params(axis='both', which='minor', labelsize=SMALL_SIZE)
-        if layer_id % (len(representations)) == 0:
-            layer = list(state_dicts[0].keys())[int(layer_id / len(representations))]
-            ax.set_ylabel(f"{layer.replace('.weight', '')}", rotation=45, labelpad=20)
-        layer_id += 1
-    fig.supxlabel('Weights Representation')
-    fig.supylabel('Layers')
-
-    # Put a legend below current axis
-
-    fig.legend(legend, labels, loc="upper center", ncol=2)
-    fig.tight_layout()
-    fig.subplots_adjust(top=0.90)
-    plt.savefig("model_parameters_statistics.png")
-    plt.close()
-
 
 def plot_embeddings(model, dataset, device, filename=None):
     embeddings = np.empty((0, model.readout_dim))

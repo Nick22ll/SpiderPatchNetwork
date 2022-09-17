@@ -4,10 +4,10 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from SpiderDatasets.MeshGraphDataset import MeshGraphDataset
+from SpiderDatasets.SpiralMehGraphDataset import SpiralMeshGraphDataset
 
 
-class MeshGraphDatasetForNNTraining:
+class SpiralMeshGraphDatasetForNNTraining:
     """
     A class that manages 3 MeshGraphDataset (the training, validation and test datasets) for AI training
     """
@@ -81,9 +81,9 @@ class MeshGraphDatasetForNNTraining:
         random.shuffle(combined)
         data_train[:], label_train[:], sample_idx_train[:] = zip(*combined)
 
-        self.train_dataset = MeshGraphDataset(dataset_name=self.name + "_train", graphs=data_train, labels=label_train, sample_id=sample_idx_train, mesh_id=mesh_idx_train)
-        self.test_dataset = MeshGraphDataset(dataset_name=self.name + "_test", graphs=data_test, labels=label_test, sample_id=sample_idx_test, mesh_id=mesh_idx_test)
-        self.validation_dataset = MeshGraphDataset(dataset_name=self.name + "_val", graphs=data_validation, labels=label_validation, sample_id=sample_idx_validation, mesh_id=mesh_idx_validation)
+        self.train_dataset = SpiralMeshGraphDataset(dataset_name=self.name + "_train", graphs=data_train, labels=label_train, sample_id=sample_idx_train, mesh_id=mesh_idx_train)
+        self.test_dataset = SpiralMeshGraphDataset(dataset_name=self.name + "_test", graphs=data_test, labels=label_test, sample_id=sample_idx_test, mesh_id=mesh_idx_test)
+        self.validation_dataset = SpiralMeshGraphDataset(dataset_name=self.name + "_val", graphs=data_validation, labels=label_validation, sample_id=sample_idx_validation, mesh_id=mesh_idx_validation)
 
     def getNodeFeatsNames(self):
         return self.train_dataset.graphs[0].getNodeFeatsNames()
@@ -142,19 +142,7 @@ class MeshGraphDatasetForNNTraining:
             feat_names.remove("vertices")
 
         for dataset in tqdm([self.train_dataset, self.validation_dataset, self.test_dataset]):
-            for mesh_graph in tqdm(dataset.graphs):
-                for patch in mesh_graph.patches:
-                    patch.ndata["aggregated_feats"] = patch.ndata[feat_names[0]]
-                    patch.ndata.pop(feat_names[0])
-                    for name in feat_names[1:]:
-                        if patch.node_attr_schemes()[name].shape == ():
-                            patch.ndata["aggregated_feats"] = torch.hstack((patch.ndata["aggregated_feats"], torch.reshape(patch.ndata[name], (-1, 1))))
-                            patch.ndata.pop(name)
-                        else:
-                            patch.ndata["aggregated_feats"] = torch.hstack((patch.ndata["aggregated_feats"], patch.ndata[name]))
-                            patch.ndata.pop(name)
-
-        return self.train_dataset.graphs[0].patches[0].ndata["aggregated_feats"].shape
+            dataset.aggregateNodeFeatures(feat_names)
 
     def aggregateEdgeFeatures(self, feat_names="all"):
         """
@@ -165,27 +153,13 @@ class MeshGraphDatasetForNNTraining:
             feat_names = self.getPatchEdgeFeatsNames()
 
         for dataset in [self.train_dataset, self.validation_dataset, self.test_dataset]:
-            for mesh_graph in dataset.graphs:
-                for patch in mesh_graph.patches:
-                    patch.edata["weights"] = patch.edata[feat_names[0]]
-                    for name in feat_names[1:]:
-                        if patch.edge_attr_schemes()[name].shape == ():
-                            patch.edata["weights"] = torch.hstack((patch.edata["weights"], torch.reshape(patch.edata[name], (-1, 1))))
-                            patch.edata.pop(name)
-                        else:
-                            patch.edata["weights"] = torch.hstack((patch.edata["weights"], patch.edata[name]))
-                            patch.edata.pop(name)
+            dataset.aggregateEdgeFeatures(feat_names)
 
         return self.train_dataset.graphs[0].patches[0].edata["weights"].shape
 
     def removeNonAggregatedFeatures(self):
-        feats_name = self.getPatchNodeFeatsNames()
-        feats_name.remove("aggregated_feats")
         for dataset in [self.train_dataset, self.validation_dataset, self.test_dataset]:
-            for mesh_graph in dataset.graphs:
-                for patch in mesh_graph.patches:
-                    for name in feats_name:
-                        patch.ndata.pop(name)
+            dataset.removeNonAggregatedFeatures()
 
     def normalize(self):
         """
@@ -264,9 +238,9 @@ class MeshGraphDatasetForNNTraining:
         @param test_name:(string) Use it if the test dataset doesn't follow the standard name system.
         @return:
         """
-        self.train_dataset = MeshGraphDataset()
-        self.validation_dataset = MeshGraphDataset()
-        self.test_dataset = MeshGraphDataset()
+        self.train_dataset = SpiralMeshGraphDataset()
+        self.validation_dataset = SpiralMeshGraphDataset()
+        self.test_dataset = SpiralMeshGraphDataset()
 
         if train_name is None:
             self.train_dataset.load_from(path, name + "_train")
@@ -287,14 +261,14 @@ class MeshGraphDatasetForNNTraining:
         else:
             self.test_dataset.load_from(path, test_name)
 
-    def loadFromMeshGraphDataset(self, dataset_path, dataset_name):
+    def loadFromSpiralMeshGraphDataset(self, dataset_path, dataset_name):
         """
         Loads a MeshGraphDatasetForNNTraining from a MeshGraphDataset file.
         @param dataset_path: (string) The path to the folder containing the dataset file.
         @param dataset_name: (string) The dataset file name.
         @return:
         """
-        dataset = MeshGraphDataset()
+        dataset = SpiralMeshGraphDataset()
         dataset.load_from(dataset_path, dataset_name)
         self.name = dataset.name
         self.split_dataset(dataset)

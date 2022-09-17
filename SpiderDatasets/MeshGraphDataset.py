@@ -9,7 +9,7 @@ import torch
 from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
 
-from SpiderPatch.MeshGraph import MeshGraph
+from MeshGraph.MeshGraph import MeshGraph, SpiralMeshGraph
 
 
 class MeshGraphDataset(DGLDataset):
@@ -76,6 +76,37 @@ class MeshGraphDataset(DGLDataset):
                         patch.ndata[feature] = torch.tensor(node_normalizers[feature].transform(patch.ndata[feature]), dtype=torch.float32)
 
         return node_normalizers
+
+    def normalize_edge(self, edge_normalizers=None):
+        """
+        Normalizes node data of the graphs. The normalization process is applied per feature
+        @param edge_normalizers: (dict) { "feat_name" : sklearn.preprocessing.Scaler}, a dict that map a feature to his normalizer. If None normalizers are calculated at runtime.
+        @return: node_normalizers: (dict) { "feat_name" : sklearn.preprocessing.Scaler}, a dict that map a feature to his normalizer used in the normalization process.
+        """
+
+        if edge_normalizers is None:
+            edge_normalizers = {}
+            feats_names = self.graphs[0].patches[0].getEdgeFeatsNames()
+            for feature in feats_names:
+                edge_normalizers[feature] = MinMaxScaler((0, 1))
+
+            for mesh_graph in tqdm(self.graphs, position=0, leave=True, desc=f"Normalizer Fitting: ", colour="white", ncols=80):
+                for patch in mesh_graph.patches:
+                    for feature in feats_names:
+                        if patch.edge_attr_schemes()[feature].shape == ():
+                            edge_normalizers[feature].partial_fit(patch.edata[feature].reshape((-1, 1)))
+                        else:
+                            edge_normalizers[feature].partial_fit(patch.edata[feature])
+
+        for mesh_graph in tqdm(self.graphs, position=0, leave=True, desc=f"Normalizing: ", colour="white", ncols=80):
+            for patch in mesh_graph.patches:
+                for feature in edge_normalizers.keys():
+                    if patch.edge_attr_schemes()[feature].shape == ():
+                        patch.edata[feature] = torch.tensor(edge_normalizers[feature].transform(patch.edata[feature].reshape((-1, 1))), dtype=torch.float32)
+                    else:
+                        patch.edata[feature] = torch.tensor(edge_normalizers[feature].transform(patch.edata[feature]), dtype=torch.float32)
+
+        return edge_normalizers
 
     def save_to(self, save_path=None):
         os.makedirs(save_path, exist_ok=True)

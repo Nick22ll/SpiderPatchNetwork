@@ -6,19 +6,23 @@ class ConcentricRings:
         if len(args) == 0:
             self.seed_point = None
             self.seed_point_face = None
+            self.lrf = None
             self.rings = []
         elif len(args) == 1 and isinstance(args[0], Ring):
             self.seed_point = None
             self.seed_point_face = None
+            self.lrf = None
             self.rings = [args[0]]
         elif len(args) == 1 and isinstance(args[0], np.ndarray):
             self.rings = []
             self.seed_point_face = None
+            self.lrf = None
             self.seed_point = args[0]
         elif len(args) == 2 and isinstance(args[0], np.ndarray) and isinstance(args[1], int):
             self.rings = []
             self.seed_point_face = args[1]
             self.seed_point = args[0]
+            self.lrf = None
 
     def __getitem__(self, *args):
         if isinstance(args[0], (int, slice)):

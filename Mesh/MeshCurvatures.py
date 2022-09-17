@@ -1,17 +1,14 @@
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.metrics import pairwise_distances
-from trimesh import Trimesh
-from trimesh.curvature import discrete_mean_curvature_measure, discrete_gaussian_curvature_measure
+from tqdm import tqdm
 
 
 def getCurvatures(mesh, radius):
     ## VERTEX FEATURES
-    Cmean_vertex, Cgauss_vertex, __, __, lambda1, lambda2 = principalArbitraryCurvatures(mesh, radius)
+    Cmean_vertex, Cgauss_vertex, __, __, lambda1, lambda2, localDepth_vertex = principalArbitraryCurvatures(mesh, radius)
     Curvedness_vertex = np.sqrt((np.multiply(lambda1, lambda1) + np.multiply(lambda2, lambda2)) / 2)
     K2_vertex = np.maximum(lambda1, lambda2)
-    localDepth_vertex = calculateArbitraryLocalDepth(mesh, mesh.vertices, radius)
-    # localDepth_vertex = calculateLocalDepth(mesh)
     vertex_curvatures = {"mean_curvature": Cmean_vertex, "gauss_curvature": Cgauss_vertex, "curvedness": Curvedness_vertex, "K2": K2_vertex, "local_depth": localDepth_vertex}
 
     ## FACET FEATURES
@@ -29,14 +26,18 @@ def principalArbitraryCurvatures(mesh, radius):
     vertex_number = mesh.vertices.shape[0]
 
     # Calculate vertices normals
-    vertex_normals = mesh.vertex_normals()
+    vertex_normals = mesh.vertex_normals
 
     Lambda1 = np.zeros((vertex_number, 1))
     Lambda2 = np.zeros((vertex_number, 1))
     Dir1 = np.zeros((vertex_number, 3))
     Dir2 = np.zeros((vertex_number, 3))
 
-    for i in range(0, vertex_number):
+    radius = pow(radius, 2)
+    pca = PCA(n_components=3)
+    vertexLD = np.full(shape=len(mesh.vertices), fill_value=np.nan)
+
+    for i in tqdm(range(0, vertex_number), position=0, leave=False, desc=f"Calculated vertices: ", colour="white", ncols=80):
         rot, invRot = VectorRotationMatrix(vertex_normals[i])
         seed_point = mesh.vertices[i]
         neigh_vertices = np.where(pairwise_distances(mesh.vertices, seed_point.reshape((1, -1)), metric="sqeuclidean") < radius)[0]
@@ -66,10 +67,17 @@ def principalArbitraryCurvatures(mesh, radius):
         Dir1[i, :] = dir1 / np.sqrt(dir1[0] ** 2 + dir1[1] ** 2 + dir1[2] ** 2)
         Dir2[i, :] = dir2 / np.sqrt(dir2[0] ** 2 + dir2[1] ** 2 + dir2[2] ** 2)
 
+        # LocalDepth
+        mass_center = np.mean(neigh_vertices, axis=0)
+        neigh_vertices -= mass_center
+        pca.fit(neigh_vertices)
+        component = pca.components_[2, :]
+        vertexLD[i] = np.abs(np.dot(mesh.vertices[i] - mass_center, component))
+
     Cmean = (Lambda1 + Lambda2) / 2
     Cgaussian = Lambda1 * Lambda2
 
-    return Cmean.flatten(), Cgaussian.flatten(), Dir1.flatten(), Dir2.flatten(), Lambda1.flatten(), Lambda2.flatten()
+    return Cmean.flatten(), Cgaussian.flatten(), Dir1.flatten(), Dir2.flatten(), Lambda1.flatten(), Lambda2.flatten(), vertexLD
 
 
 def principalCurvatures(mesh, usethird=False):
@@ -77,7 +85,7 @@ def principalCurvatures(mesh, usethird=False):
     vertex_number = mesh.vertices.shape[0]
 
     # Calculate vertices normals
-    vertex_normals = mesh.vertex_normals()
+    vertex_normals = mesh.vertex_normals
 
     Lambda1 = np.zeros((vertex_number, 1))
     Lambda2 = np.zeros((vertex_number, 1))
@@ -163,25 +171,6 @@ def VectorRotationMatrix(v=None):
     Minv = np.vstack((np.ravel(v), np.ravel(l), np.ravel(k))).transpose()
     M = np.linalg.inv(Minv)
     return M, Minv
-
-
-def calculateCurvaturesOnPoint(mesh, points, radius_multiplier=1.0):
-    """
-    Returns the discrete gaussian curvature measure and the discrete mean curvature measure of a sphere centered at a point as detailed in ‘Restricted Delaunay triangulations and normal cycle’- Cohen-Steiner and Morvan.
-    Gaussian Curvature is the sum of the vertex defects at all vertices within the radius for each point.
-    Mean Curvature is the sum of the angle at all edges contained in the sphere for each point.
-
-    @param mesh: a Mesh() object
-    @param points:  ((n, 3) float) – Points in space
-    @param radius_multiplier:  (float) – Sphere radius multiplier which should typically be greater than zero. The base sphere radius is calculated as the average mesh faces edge lenght
-    @return: G, H (((n,),(n,)) float)
-    """
-    points = points.reshape((-1, 3))
-    radius = 1 * radius_multiplier
-    tri_mesh = Trimesh(mesh.vertices, mesh.faces, process=True)
-    G = discrete_gaussian_curvature_measure(tri_mesh, points, radius)
-    H = discrete_mean_curvature_measure(tri_mesh, points, radius)
-    return G, H
 
 
 def calculateLocalDepth(mesh, seed_points=None):

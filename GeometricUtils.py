@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.linalg import *
 from math import *
-
+import warnings
 from scipy.spatial.transform import Rotation
 from sklearn.metrics import pairwise_distances
 
@@ -20,7 +20,6 @@ def threePlaneIntersection(n1, d1, n2, d2, n3=None, d3=0):
 
     if n3 is None:
         n3 = [1, 0, 0]
-
     A = np.vstack((n1, n2, n3))
     detA = det(A)
     d = np.array([d1, d2, d3])
@@ -37,6 +36,7 @@ def threePlaneIntersection(n1, d1, n2, d2, n3=None, d3=0):
         Az = np.array(A)
         Az[:, 2] = np.array(d)
         p = np.hstack((det(Ax) / detA, det(Ay) / detA, det(Az) / detA))
+
     return p
 
 
@@ -90,41 +90,45 @@ def intersectLinePlane(l_point, l_dir, p_point, p_normal, epsilon=1e-8):
     return None
 
 
-def pointsInFace(points, face):
+def pointInFace(point, face):
     """
 
-    @param points: (Nx3) array of points
+    @param point: (1x3) array of points
     @param face: (3x3) array of points that represents a face
     @return: (Rx3) array of points
     """
-    intersecting_points = []
-    for point in points:
-        a = face[1] - face[0]
-        b = face[2] - face[0]
-        c = point - face[0]
+    a = face[1] - face[0]
+    b = face[2] - face[0]
+    c = point - face[0]
+    ab = a[0] * b[1] - a[1] * b[0]
+    ac = a[0] * c[1] - a[1] * c[0]
+    cb = c[0] * b[1] - c[1] * b[0]
+
+    if np.sign(ab) == np.sign(ac) and np.sign(ac) == np.sign(cb) or np.any(np.absolute(np.array([ab, ac, cb])) < 10e-10):
+        a = face[2] - face[1]
+        b = face[0] - face[1]
+        c = point - face[1]
         ab = a[0] * b[1] - a[1] * b[0]
         ac = a[0] * c[1] - a[1] * c[0]
         cb = c[0] * b[1] - c[1] * b[0]
-
         if np.sign(ab) == np.sign(ac) and np.sign(ac) == np.sign(cb) or np.any(np.absolute(np.array([ab, ac, cb])) < 10e-18):
-            a = face[2] - face[1]
-            b = face[0] - face[1]
-            c = point - face[1]
-            ab = a[0] * b[1] - a[1] * b[0]
-            ac = a[0] * c[1] - a[1] * c[0]
-            cb = c[0] * b[1] - c[1] * b[0]
-            if np.sign(ab) == np.sign(ac) and np.sign(ac) == np.sign(cb) or np.any(np.absolute(np.array([ab, ac, cb])) < 10e-18):
-                intersecting_points.append(point)
-
-    return np.array(intersecting_points)
+            return True
+    return False
 
 
-def pointsInFacev2(points, face):
+def pointsInFace(points, face):
     inFace = [pointInFace(point, face) for point in points]
     return points[inFace]
 
 
-def pointInFace(point, face):
+# TODO ricontrollare pointInFace
+def pointsInFacev2(points, face):
+    inFace = [pointInFacev2(point, face) for point in points]
+    return points[inFace]
+
+
+# TODO ricontrollare casistiche
+def pointInFacev2(point, face):
     """
     implementation of triangle interior theorem
     @param point:
@@ -247,6 +251,28 @@ def generateCircleNormals(vertex_normals, n_normals, on360=False):
     return circle_normals
 
 
+def generateCircleNormalsv2(lrf, n_normals, on360=False):
+    """
+    Generates n_normals rotating a vertex_normal
+
+    @param n_normals:
+    @param on360: set True if you want a 360-degree rotation subdivision
+    @return: (n_normals x 3 ) array
+    """
+
+    circle_normals = np.empty((n_normals, 3))
+    circle_normals[0] = lrf[0]
+    if on360:
+        rotation_radians = np.radians(360 / n_normals)
+    else:
+        rotation_radians = np.radians(180 / n_normals)
+    for i in range(1, n_normals):
+        rotation_vector = rotation_radians * i * lrf[1]
+        rotation = Rotation.from_rotvec(rotation_vector)
+        circle_normals[i] = rotation.apply(circle_normals[0])
+    return circle_normals
+
+
 def faceArea(mesh, face_idx):
     corner = mesh.vertices[mesh.faces[face_idx][:, 0]]
     a = mesh.vertices[mesh.faces[face_idx][:, 1]] - corner
@@ -257,8 +283,8 @@ def faceArea(mesh, face_idx):
 def LRF_normals(mesh, seed_point_idx, radius):
     distances = pairwise_distances(mesh.vertices, mesh.vertices[seed_point_idx].reshape((1, 3)), metric="euclidean")
     indices = np.where(distances < radius)[0]
-    feature_point = mesh.vertex_normals()[seed_point_idx]
-    support_points = mesh.vertex_normals()[indices]
+    feature_point = mesh.vertex_normals[seed_point_idx]
+    support_points = mesh.vertex_normals[indices]
     distances = distances[indices]
     M = np.zeros((3, 3))
     factor = 0

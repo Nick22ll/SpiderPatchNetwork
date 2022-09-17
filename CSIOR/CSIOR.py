@@ -1,5 +1,7 @@
 import time
 
+from CSI.CSI import CSI
+from Mesh.Mesh import Mesh
 from .IntersectCircleMesh import *
 from .FixFacet import *
 
@@ -41,7 +43,7 @@ def CSIOR(original_mesh, edge_length=None, seed_point_idx=None):
     radius = sqrt(pow(edge_length, 2) - pow((edge_length / 2), 2))
 
     circle_centers = np.tile(original_mesh.vertices[seed_point_idx], (3, 1))  # Array of vertices indices
-    circle_normals = generateCircleNormals(original_mesh.vertex_normals()[seed_point_idx], 3)
+    circle_normals = generateCircleNormals(original_mesh.vertex_normals[seed_point_idx], 3)
     circle_deltas = np.sum(circle_centers * circle_normals, axis=1)  # Substitute of circle_deltas = np.dot(circle_centers, circle_normals)
     first_hexagon = np.zeros((6, 3))
 

@@ -2,6 +2,7 @@ import warnings
 from time import time
 import pickle as pkl
 import numpy as np
+import torch
 from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
 
 from PlotUtils import plot_confusion_matrix, save_confusion_matrix, plot_training_statistics, plot_embeddings, plot_model_parameters_comparison, plot_grad_flow, print_weights, print_weights_difference
@@ -11,6 +12,18 @@ from SpiderDatasets.MeshGraphForTrainingDataset import MeshGraphDatasetForNNTrai
 from SpiderPatch.CONVNetworks import *
 from tqdm import tqdm, trange
 from dgl.dataloading import GraphDataLoader
+
+
+def add_edge_weight(mesh_graph_dataset):
+    for mesh_graph in mesh_graph_dataset.graphs:
+        weights = []
+        for edge_id in range(int(len(mesh_graph.edges()[0]) / 2)):
+            start = mesh_graph.patches[mesh_graph.edges()[0][edge_id]].seed_point
+            end = mesh_graph.patches[mesh_graph.edges()[1][edge_id]].seed_point
+            distance = np.linalg.norm(end - start)
+            weights.append(1 - (1 / distance))
+        weights = np.concatenate((weights, weights))
+        mesh_graph.edata["weights"] = torch.tensor(weights, dtype=torch.float32)
 
 
 def main():
@@ -27,12 +40,18 @@ def main():
     # dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R10_RI3_P4_PATCH50_SAMPLE30_CONN20_ONLYCURV/SHREC17_R10_RI3_P4_PATCH50_SAMPLE30_CONN20_ONLYCURV_all_Normalized", f"SHREC17_R10_RI3_P4_PATCH50_SAMPLE30_CONN20_ONLYCURV_all")
     # dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R10_RI6_P6_PATCH50_SAMPLE30_CONN10/SHREC17_R10_RI6_P6_PATCH50_SAMPLE30_CONN10_level_0_Normalized", f"SHREC17_R10_RI6_P6_PATCH50_SAMPLE30_CONN10_level_0")
     # dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R10_RI6_P6_PATCH25_SAMPLE20_CONN3_ONLY2CURV/SHREC17_R10_RI6_P6_PATCH25_SAMPLE20_CONN3_ONLY2CURV_all_Normalized", f"SHREC17_R10_RI6_P6_PATCH25_SAMPLE20_CONN3_ONLY2CURV_all")
-    # dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R10_RI6_P6_PATCH20_SAMPLE2_3CONN_ONLY2CURV/SHREC17_R10_RI6_P6_PATCH20_SAMPLE2_3CONN_ONLY2CURV_all_Normalized", f"SHREC17_R10_RI6_P6_PATCH20_SAMPLE2_3CONN_ONLY2CURV_all")
-    # dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R10_RI6_P6_PATCH50_SAMPLE10_FC/SHREC17_R10_RI6_P6_PATCH50_SAMPLE10_FC_{level}", f"SHREC17_R10_RI6_P6_PATCH50_SAMPLE10_FC_{level}")
-    # dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R10_RI6_P6_PATCH20_SAMPLE10_FC/SHREC17_R10_RI6_P6_PATCH20_SAMPLE10_FC_{level}_Normalized", f"SHREC17_R10_RI6_P6_PATCH20_SAMPLE10_FC_{level}")
-    dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R10_RI3_P4_PATCH30_SAMPLE20_FC_LRF/SHREC17_R10_RI3_P4_PATCH30_SAMPLE20_FC_LRF_all_Normalized", f"SHREC17_R10_RI3_P4_PATCH30_SAMPLE20_FC_LRF_all")
+    # dataset.load(f"Datasets/MeshGraphsForTraining/
+    # s/MeshGraphsForTraining/SHREC17_R10_RI6_P6_PATCH20_SAMPLE10_FC/SHREC17_R10_RI6_P6_PATCH20_SAMPLE10_FC_{level}_Normalized", f"SHREC17_R10_RI6_P6_PATCH20_SAMPLE10_FC_{level}")
+    # dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R10_RI3_P4_PATCH30_SAMPLE20_FC_LRF/SHREC17_R10_RI3_P4_PATCH30_SAMPLE20_FC_LRF_all_Normalized", f"SHREC17_R10_RI3_P4_PATCH30_SAMPLE20_FC_LRF_all")
+    dataset.load(f"Datasets/MeshGraphsForTraining/SHREC17_R10_RI6_P6_SUPERPATCH10_SAMPLE20/SHREC17_R10_RI6_P6_SUPERPATCH10_SAMPLE20_FC_Normalized", f"SHREC17_R10_RI6_P6_SUPERPATCH10_SAMPLE20_FC")
+    add_edge_weight(dataset.train_dataset)
+    add_edge_weight(dataset.validation_dataset)
+    add_edge_weight(dataset.test_dataset)
+    dataset.normalize_edge()
+    dataset.normalize_test_dataset_edge()
+    dataset.normalize_validation_dataset_edge()
     print(dataset.train_dataset.graphs[0].patches[0].node_attr_schemes())
-    dataset.aggregateNodeFeatures(["v_normals", "f_normal", "gauss_curvature", "mean_curvature", "curvedness", "K2", "local_depth"])
+    dataset.aggregateNodeFeatures(["gauss_curvature", "mean_curvature", "curvedness", "K2", "local_depth"])
 
     dataset.aggregateEdgeFeatures()
     dataset.removeNonAggregatedFeatures()
@@ -53,12 +72,10 @@ def main():
 
     dataset.to(device)
 
-    model = MeshNetwork(patch_feat_dim=dataset.train_dataset.graphs[0].patches[0].ndata["aggregated_feats"].shape[1], internal_hidden_dim=2048, readout_dim=128, hidden_dim=1024, out_feats=15, dropout=0.5, patch_batch=10)
-    # model.load(f"TrainedModels/Train_SHREC17_R5_RI4_P6_PATCH25_SAMPLE10_FC_all/MeshNetworkBestLoss/network.pt")
+    model = MeshNetwork(patch_feat_dim=dataset.train_dataset.graphs[0].patches[0].ndata["aggregated_feats"].shape[1], internal_hidden_dim=1024, readout_dim=64, hidden_dim=2048, out_feats=15, dropout=0.5, patch_batch=10, patch_edge_weights=True, mesh_graph_edge_weights=True)
     model.to(device)
 
-    # trainMeshNetwork(model, dataset, device, 300, f"SHREC17_R10_RI3_P4_PATCH30_SAMPLE100_FC_ONLYCURV_level_1_COMPLEX", dataset.validation_dataset)
-    trainMeshNetwork(model, dataset, device, 300, f"SHREC17_R10_RI3_P4_PATCH30_SAMPLE20_FC_LRF_all_VFNormals", dataset.validation_dataset)
+    trainMeshNetwork(model, dataset, device, 150, f"SHREC17_R10_RI6_P6_SUPERPATCH10_SAMPLE20_FC_ONLYCURV_BIASWEIGHT_NORMEDGEWEIGHTS_X4", dataset.validation_dataset)
 
     # acc, loss, cm = testMeshNetwork(model=model, dataset=test_dataset, device=device)
     # print(f"Validation Test\n"
@@ -74,9 +91,9 @@ def trainMeshNetwork(model, dataset, device, epochs=1000, train_name="", test_da
     best_loss = 1000
 
     dataloader = GraphDataLoader(dataset.train_dataset, batch_size=1, drop_last=False)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-6, weight_decay=10e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=10e-4)
     # optimizer = torch.optim.Adam([{"params": model.patch_reader.parameters(), "lr": 10e-4}, {"params": model.mesh_reader.parameters(), "lr": 10e-5}], weight_decay=10e-4)
-    scheduler = MultiStepLR(optimizer, milestones=[100, 250], gamma=0.1)
+    scheduler = MultiStepLR(optimizer, milestones=[int(epochs * 0.65), int(epochs * 0.90)], gamma=0.1)
     # scheduler = ReduceLROnPlateau(optimizer, patience=5, factor=0.5, threshold=0.01)
     start = time()
     train_losses = []
