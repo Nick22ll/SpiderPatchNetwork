@@ -63,8 +63,13 @@ class Mesh:
             self.vertex_curvatures[radius], self.face_curvatures[radius] = getCurvatures(self, np.max(self.oriented_bounding_box["extent"]) * levels[radius])
 
     # TODO toglierlo
-    def computeCurvaturesTemp(self):
-        radius = {0: 0.1, 1: 0.5, 2: 1, 3: 1.5, 4: 2}
+    def computeCurvaturesTemp(self, type="LC"):
+        if type == "LC":
+            radius = {0: 0.1, 1: 0.5, 2: 1, 3: 1.5, 4: 2}
+        elif type == "BC":
+            radius = {0: 1, 1: 2, 2: 4, 3: 8, 4: 10}
+        else:
+            return -1
         self.computeOrientedBoundingBox()
         for id, key in enumerate(radius):
             self.vertex_curvatures[id], self.face_curvatures[id] = getCurvatures(self, radius[key])
@@ -152,7 +157,7 @@ class Mesh:
         mesh.compute_vertex_normals()
         o3d.visualization.draw_geometries([mesh], mesh_show_back_face=True)
 
-    def drawWithConcRings(self, concRing):
+    def drawWithConcRings(self, concRing, lrf=False):
         vertices = o3d.utility.Vector3dVector(self.vertices)
         faces = o3d.utility.Vector3iVector(self.faces)
         mesh = o3d.geometry.TriangleMesh(vertices, faces)
@@ -177,7 +182,19 @@ class Mesh:
         points = o3d.utility.Vector3dVector(points)
         cloud = o3d.geometry.PointCloud(points)
         cloud.colors = o3d.utility.Vector3dVector(color_points)
-        o3d.visualization.draw_geometries([mesh, cloud], mesh_show_back_face=True)
+
+        line_set = o3d.geometry.LineSet()
+
+        if lrf:
+            idx = np.argmin(pairwise_distances(concRing.seed_point.reshape((1, -1)), mesh.vertices, metric="sqeuclidean"))
+            vertex_normal = mesh.vertex_normals[idx]
+            points = [concRing.seed_point, (concRing.seed_point + (concRing.lrf[0] * 3)), (concRing.seed_point + (concRing.lrf[1] * 3)), (concRing.seed_point + (concRing.lrf[2] * 3)), (concRing.seed_point + (vertex_normal * 10))]
+            lines = [[0, 1], [0, 2], [0, 3], [0, 4]]
+            line_set.points = o3d.utility.Vector3dVector(points)
+            line_set.lines = o3d.utility.Vector2iVector(lines)
+            line_set.colors = o3d.utility.Vector3dVector([[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 1, 1]])
+
+        o3d.visualization.draw_geometries([mesh, cloud, line_set], mesh_show_back_face=True)
 
     def drawFaces(self, indices, color=np.array([1, 0, 0])):
         vertices = o3d.utility.Vector3dVector(self.vertices)

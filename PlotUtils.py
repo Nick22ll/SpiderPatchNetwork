@@ -1,3 +1,4 @@
+import operator
 import os
 import pickle
 import seaborn as sns
@@ -9,10 +10,6 @@ import torch
 from dgl.dataloading import GraphDataLoader
 from matplotlib.lines import Line2D
 from sklearn.manifold import TSNE
-
-from Networks.CONVNetworks import MeshNetwork
-from SpiderDatasets.MeshGraphForTrainingDataset import MeshGraphDatasetForNNTraining
-
 
 
 def plot_confusion_matrix(cm, target_names=None, cmap=None):
@@ -40,7 +37,9 @@ def plot_confusion_matrix(cm, target_names=None, cmap=None):
     plt.clf()
 
 
-def save_confusion_matrix(cm, path, target_names=None, cmap=None):
+def save_confusion_matrix(cm, path, filename, target_names=None, cmap=None):
+    os.makedirs(path, exist_ok=True)
+
     if cmap is None:
         cmap = plt.get_cmap('Blues')
 
@@ -60,7 +59,7 @@ def save_confusion_matrix(cm, path, target_names=None, cmap=None):
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
     plt.tight_layout()
-    plt.savefig(path)
+    plt.savefig(path + "/" + filename)
     plt.close()
     plt.clf()
 
@@ -99,15 +98,45 @@ def plot_grad_flow(named_parameters):
     plt.show()
 
 
-def plot_training_statistics(filename, epochs, losses, val_epochs, val_accuracies, val_losses, title="Training Statistics"):
+def plot_training_statistics(path, filename, epochs, losses, val_accuracies, val_epochs, val_losses=None, title="Training Statistics"):
+    os.makedirs(path, exist_ok=True)
     plt.plot(epochs, losses, 'sienna', label='Training Loss')
     plt.plot(val_epochs, val_accuracies, 'steelblue', label='Validation Accuracy')
-    plt.plot(val_epochs, val_losses, 'cyan', label='Validation Loss')
+    if val_losses is not None:
+        plt.plot(val_epochs, val_losses, 'cyan', label='Validation Loss')
     plt.title(title)
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
-    plt.savefig(filename)
+    plt.savefig(path + "/" + filename)
+    plt.close()
+
+
+def func_key(elem):
+    return int(elem[0][0:elem[0].find("_")])
+
+
+def plot_voting_confidences(dict_to_plot, path, filename):
+    confidences = []
+    classes = []
+
+    for key, value in list(dict_to_plot["data"].items()):
+        classes.append(str(key) + "_" + str(value[0]))
+        confidences.append(value[1])
+
+    classes, confidences = zip(*sorted(zip(classes, confidences), key=func_key, reverse=False))
+
+    # creating the bar plot
+    plt.figure(figsize=(20, 8))
+    plt.bar(classes, confidences, color=dict_to_plot["colors"], width=0.8)
+    plt.ylim(bottom=0, top=1)
+    plt.grid(True)
+    plt.xticks(rotation=60)
+    plt.xlabel("Classes")
+    plt.ylabel("Confidence")
+    plt.title("Top 3 Confidence levels")
+    plt.tight_layout()
+    plt.savefig(path + "/" + filename)
     plt.close()
 
 
@@ -160,6 +189,7 @@ def plot_embeddings_statistics(paths, id, title="", labels=None):
     # Put a legend below current axis
     ax.legend(legend, labels, loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=2)
     plt.show()
+
 
 def plot_embeddings(model, dataset, device, filename=None):
     embeddings = np.empty((0, model.readout_dim))

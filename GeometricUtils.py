@@ -4,6 +4,7 @@ from math import *
 import warnings
 from scipy.spatial.transform import Rotation
 from sklearn.metrics import pairwise_distances
+from scipy.spatial.distance import cosine
 
 
 def threePlaneIntersection(n1, d1, n2, d2, n3=None, d3=0):
@@ -159,25 +160,9 @@ def faceOf3DPoint(point, mesh):
     """
     @return: (Rx3) array of points
     """
-
     for face_id, face in enumerate(mesh.faces):
-        a = mesh.vertices[face[1]] - mesh.vertices[face[0]]
-        b = mesh.vertices[face[2]] - mesh.vertices[face[0]]
-        c = point - mesh.vertices[face[0]]
-        ab = a[0] * b[1] - a[1] * b[0]
-        ac = a[0] * c[1] - a[1] * c[0]
-        cb = c[0] * b[1] - c[1] * b[0]
-
-        if np.sign(ab) == np.sign(ac) and np.sign(ac) == np.sign(cb) or np.any(np.absolute(np.array([ab, ac, cb])) < .00000000001):
-            a = mesh.vertices[face[2]] - mesh.vertices[face[1]]
-            b = mesh.vertices[face[0]] - mesh.vertices[face[1]]
-            c = point - mesh.vertices[face[1]]
-            ab = a[0] * b[1] - a[1] * b[0]
-            ac = a[0] * c[1] - a[1] * c[0]
-            cb = c[0] * b[1] - c[1] * b[0]
-            if np.sign(ab) == np.sign(ac) and np.sign(ac) == np.sign(cb) or np.any(np.absolute(np.array([ab, ac, cb])) < .00000000001):
-                return face_id
-
+        if pointInFace(point, face):
+            return face_id
     return -1
 
 
@@ -280,54 +265,9 @@ def faceArea(mesh, face_idx):
     return norm(np.cross(a, b), axis=1) / 2
 
 
-def LRF_normals(mesh, seed_point_idx, radius):
-    distances = pairwise_distances(mesh.vertices, mesh.vertices[seed_point_idx].reshape((1, 3)), metric="euclidean")
-    indices = np.where(distances < radius)[0]
-    feature_point = mesh.vertex_normals[seed_point_idx]
-    support_points = mesh.vertex_normals[indices]
-    distances = distances[indices]
-    M = np.zeros((3, 3))
-    factor = 0
-    for idx, p in enumerate(support_points):
-        factor += radius - distances[idx]
-        M += (radius - distances[idx]) * (np.dot((p - feature_point).reshape((3, 1)), np.transpose((p - feature_point).reshape((3, 1)))))
-    M /= factor
-    eigenvalues, eigenvectors = np.linalg.eig(M)
-
-    sort_eig_indices = np.argsort(eigenvalues)
-    eigenvalues = eigenvalues[sort_eig_indices]
-    eigenvectors = eigenvectors[sort_eig_indices]
-    x_positives, x_negatives = 0, 0
-    z_positives, z_negatives = 0, 0
-    for idx, p in enumerate(support_points):
-        if np.dot((p - feature_point), eigenvectors[0]) >= 0:
-            x_positives += 1
-        else:
-            x_negatives += 1
-
-        if np.dot((p - feature_point), eigenvectors[2]) >= 0:
-            z_positives += 1
-        else:
-            z_negatives += 1
-
-    if x_positives >= x_negatives:
-        x = eigenvectors[0]
-    else:
-        x = - eigenvectors[0]
-
-    if z_positives >= z_negatives:
-        z = eigenvectors[2]
-    else:
-        z = - eigenvectors[2]
-
-    y = np.cross(x, z)
-
-    return x, y, z
-
-
 def LRF(mesh, seed_point, radius):
-    distances = pairwise_distances(mesh.vertices, seed_point.reshape((1, 3)), metric="euclidean")
-    indices = np.where(distances < radius)[0]
+    distances = pairwise_distances(mesh.vertices, seed_point.reshape((1, 3)), metric="sqeuclidean")
+    indices = np.where(distances < pow(radius, 2))[0]
     feature_point = seed_point
     support_points = mesh.vertices[indices]
     distances = distances[indices]
@@ -367,4 +307,25 @@ def LRF(mesh, seed_point, radius):
 
     y = np.cross(x, z)
 
-    return x, y, z
+    x /= np.linalg.norm(x)
+    y /= np.linalg.norm(y)
+    z /= np.linalg.norm(z)
+
+    return [x, y, z]
+
+
+def alignZAxis(x, y, z, normal):
+    b = np.cross(z, normal)
+    b /= np.linalg.norm(b)
+    theta = np.arccos(np.dot(z, normal))
+    q0 = np.cos(theta / 2)
+    q1 = np.sin(theta / 2) * b[0]
+    q2 = np.sin(theta / 2) * b[1]
+    q3 = np.sin(theta / 2) * b[2]
+
+    Q = np.array([
+        [pow(q0, 2) + pow(q1, 2) - pow(q2, 2) - pow(q3, 2), 2 * ((q1 * q2) - +(q0 * q3)), 2 * ((q1 * q3) + (q0 * q2))],
+        [2 * ((q2 * q1) + (q0 * q3)), pow(q0, 2) - pow(q1, 2) + pow(q2, 2) - pow(q3, 2), 2 * ((q2 * q3) - (q0 * q1))],
+        [2 * ((q3 * q1) - (q0 * q2)), 2 * ((q3 * q2) + (q0 * q1)), pow(q0, 2) - pow(q1, 2) - pow(q2, 2) + pow(q3, 2)]
+    ])
+    return [Q @ x, Q @ y, Q @ z]

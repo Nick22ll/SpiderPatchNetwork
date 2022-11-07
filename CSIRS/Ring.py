@@ -55,7 +55,7 @@ class ConcentricRings:
             points = np.vstack((points, ring.points[ring.getNonNan()]))
         return points
 
-    def first_valid_rings(self, valid_number=1):
+    def firstValidRings(self, valid_number=1):
         i = 0
         while i < valid_number and i < len(self.rings):
             if len(self.rings[i].getNonNan()) != len(self.rings[i]):

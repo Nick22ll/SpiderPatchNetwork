@@ -1,6 +1,8 @@
 import warnings
 import random
 import gc
+
+import numpy as np
 from dgl.data import DGLDataset
 import os
 import pickle as pkl
@@ -9,10 +11,10 @@ import torch
 from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
 
-from MeshGraph.SpiralMeshGraph import SpiralMeshGraph
+from MeshGraph.SpiralMeshCSI import SpiralMeshCSI
 
 
-class SpiralMeshGraphDataset(DGLDataset):
+class SpiralMeshCSIDataset(DGLDataset):
     def __init__(self, dataset_name="", graphs=None, labels=None, sample_id=None, mesh_id=None):
         self.mesh_id = mesh_id
         self.sample_id = sample_id
@@ -111,7 +113,6 @@ class SpiralMeshGraphDataset(DGLDataset):
             mesh_graph.ndata["aggregated_feats"] = mesh_graph.ndata[feat_names[0]]
             mesh_graph.ndata.pop(feat_names[0])
             for name in feat_names[1:]:
-                # mesh_graph.ndata[name][1:] = mesh_graph.ndata[name][1:] - mesh_graph.ndata[name][0]
                 if mesh_graph.node_attr_schemes()[name].shape == ():
                     mesh_graph.ndata["aggregated_feats"] = torch.hstack((mesh_graph.ndata["aggregated_feats"], torch.reshape(mesh_graph.ndata[name], (-1, 1))))
                     mesh_graph.ndata.pop(name)
@@ -179,84 +180,28 @@ class SpiralMeshGraphDataset(DGLDataset):
         self.mesh_id = loaded_dataset.mesh_id
         self._name = dataset_name
 
-    def fromRawConcRings(self, configuration, resolution_level="all", graph_for_mesh=10, conc_for_graph=10, connection_number=0, feature_to_keep=None):
+    def fromRawSpiralMeshCSI(self, path):
         """
-        Generate a MeshGraphDataset from a ConcRingDataset.
+        Generate a MeshGraphDataset from a SpiralMeshCSIDataset.
 
-        @param configuration: (string) the path to the SpiderPatches dataset folder structure.
-        @param resolution_level: (string) e.g. all, level_0, level_1, ecc... The resolution level of the mesh to use.
-        @param graph_for_mesh: (int) number of MeshGraph to generate per Mesh.
-        @param conc_for_graph: (int) number of Patch to use as nodes per MeshGraph
-        @param connection_number: (int) number of neighbours per patch, leave zero for a fully connected graph
-        @param feature_to_keep: (list) A list of node features keys to keep, if None keep all features
-        @return: self
+        @param path: (string) the path to the SpiralMeshCSI dataset folder structure.
         """
-
-        print(f"Loading MeshGraph Dataset from: {configuration}")
         import re
-        random.seed(22)
         self.graphs = []
         self.labels = []
         self.sample_id = []
         self.mesh_id = []
-        if resolution_level != "all":
-            for label in tqdm(os.listdir(f"Datasets/ConcentricRings/SHREC17_{configuration}"), position=0, desc=f"Mesh Class Loading: ", colour="white", ncols=80):
-                for mesh_sample_id in os.listdir(f"Datasets/ConcentricRings/SHREC17_{configuration}/{label}"):
-                    concRings_filename = os.listdir(f"Datasets/ConcentricRings/SHREC17_{configuration}/{label}/{mesh_sample_id}/resolution_{resolution_level}")[0]
+        for label in tqdm(os.listdir(f"{path}"), position=0, desc=f"Mesh Class Loading: ", colour="white", ncols=80):
+            for mesh_sample_id in tqdm(os.listdir(f"{path}/{label}"), position=1, desc=f"Sample loading: ", colour="white", ncols=80, leave=False):
+                for resolution_level in os.listdir(f"{path}/{label}/{mesh_sample_id}"):
+                    spiral_mesh_csi_filename = os.listdir(f"{path}/{label}/{mesh_sample_id}/{resolution_level}")[0]
                     gc.disable()
-                    with open(f"Datasets/ConcentricRings/SHREC17_{configuration}/{label}/{mesh_sample_id}/resolution_{resolution_level}/{concRings_filename}", "rb") as pkl_file:
-                        concentricRings = pkl.load(pkl_file)
-                    with open(f"Datasets/Meshes/SHREC17/{label}/{mesh_sample_id}/resolution_{resolution_level}/{concRings_filename.replace('concRing', 'mesh')}", "rb") as pkl_file:
-                        mesh = pkl.load(pkl_file)
+                    with open(f"{path}/{label}/{mesh_sample_id}/{resolution_level}/{spiral_mesh_csi_filename}", "rb") as pkl_file:
+                        spiral_mesh_csi_list = pkl.load(pkl_file)
                         gc.enable()
-                        for _ in range(graph_for_mesh):
-                            mesh_id = [int(s) for s in re.findall(r'\d+', concRings_filename)]
-                            samples_id = list(range(len(concentricRings)))
-                            random.shuffle(samples_id)
-                            samples_number = 0
-                            samples = []
-                            for id in samples_id:
-                                if samples_number >= conc_for_graph:
-                                    break
-                                RI_pos = configuration.find("RI")
-                                if concentricRings[id].firstValidRings(int(configuration[RI_pos + 2:configuration.find("_", RI_pos + 2)])):
-                                    samples.append(concentricRings[id])
-                                    samples_number += 1
-                            self.graphs.append(
-                                SpiralMeshGraph(mesh, samples, sample_id=int(mesh_sample_id.removeprefix("id_")), mesh_id=int(mesh_id[0]), resolution_level=resolution_level.removeprefix("resolution_"), neighbours_number=connection_number))
+                        for spiral_mesh in spiral_mesh_csi_list:
+                            self.graphs.append(spiral_mesh)
                             self.labels.append(int(label.removeprefix("class_")))
                             self.sample_id.append(int(mesh_sample_id.removeprefix("id_")))
-                            self.mesh_id.extend(mesh_id)
-        else:
-            for label in tqdm(os.listdir(f"Datasets/ConcentricRings/SHREC17_{configuration}"), position=0, desc=f"Mesh Class Loading: ", colour="white", ncols=80):
-                for mesh_sample_id in tqdm(os.listdir(f"Datasets/ConcentricRings/SHREC17_{configuration}/{label}"), position=1, desc=f"Sample loading: ", colour="white", ncols=80, leave=False):
-                    for resolution_level in os.listdir(f"Datasets/ConcentricRings/SHREC17_{configuration}/{label}/{mesh_sample_id}"):
-                        concRings_filename = os.listdir(f"Datasets/ConcentricRings/SHREC17_{configuration}/{label}/{mesh_sample_id}/{resolution_level}")[0]
-                        gc.disable()
-                        with open(f"Datasets/ConcentricRings/SHREC17_{configuration}/{label}/{mesh_sample_id}/{resolution_level}/{concRings_filename}", "rb") as pkl_file:
-                            concentricRings = pkl.load(pkl_file)
-                        with open(f"Datasets/Meshes/SHREC17/{label}/{mesh_sample_id}/{resolution_level}/{concRings_filename.replace('concRing', 'mesh')}", "rb") as pkl_file:
-                            mesh = pkl.load(pkl_file)
-                            gc.enable()
-                            for _ in range(graph_for_mesh):
-                                mesh_id = [int(s) for s in re.findall(r'\d+', concRings_filename)]
-                                samples_id = list(range(len(concentricRings)))
-                                random.shuffle(samples_id)
-                                samples_number = 0
-                                samples = []
-                                for id in samples_id:
-                                    if samples_number >= conc_for_graph:
-                                        break
-                                    RI_pos = configuration.find("RI")
-                                    rings = int(configuration[RI_pos + 2:configuration.find("_", RI_pos + 2)])
-                                    if concentricRings[id].firstValidRings(rings):
-                                        samples.append(concentricRings[id])
-                                        samples_number += 1
-                                self.graphs.append(
-                                    SpiralMeshGraph(mesh, samples, sample_id=int(mesh_sample_id.removeprefix("id_")), mesh_id=int(mesh_id[0]), resolution_level=resolution_level.removeprefix("resolution_"), neighbours_number=connection_number))
-                                self.labels.append(int(label.removeprefix("class_")))
-                                self.sample_id.append(int(mesh_sample_id.removeprefix("id_")))
-                                self.mesh_id.extend(mesh_id)
-
+                            self.mesh_id.append(int(re.sub(r"\D", "", spiral_mesh_csi_filename)))
         super().__init__(name=self.name)
-        return self

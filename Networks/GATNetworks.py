@@ -5,126 +5,158 @@ import torch
 import torch.nn as nn
 from torch_geometric.nn import GraphNorm
 from dgl.dataloading import GraphDataLoader
-from dgl.nn.pytorch import GATConv
+from dgl.nn.pytorch import GATConv, SortPooling
+
+from Networks.MLP import GenericMLP
+from Networks.SpiralReadout import SpiralReadout
+from Networks.UniversalReadout import UniversalReadout
 
 
-class PatchReader2GATLayer(nn.Module):
-    def __init__(self, in_feats, hidden_dim, out_feats, dropout):
-        super(PatchReader2GATLayer, self).__init__()
+class GMReader2GATSortPoolReadout(nn.Module):
+    def __init__(self, in_dim, hidden_dim, out_dim, pool_dim, dropout):
+        super(GMReader2GATSortPoolReadout, self).__init__()
 
         ####  Layers  ####
-        self.GAT1 = GATConv(in_feats=in_feats, out_feats=hidden_dim, num_heads=4, feat_drop=dropout, attn_drop=dropout, residual=False, bias=False)
-        self.GAT2 = GATConv(in_feats=hidden_dim * 4, out_feats=64, num_heads=3, feat_drop=dropout, attn_drop=dropout, residual=False, bias=False)
-        self.GATclassifier = GATConv(in_feats=64 * 3, out_feats=32, num_heads=2, feat_drop=dropout, attn_drop=dropout, residual=False, bias=False)
-        self.classifier = nn.Linear(32, out_feats, bias=False)
+        self.GAT1 = GATConv(in_feats=in_dim, out_feats=hidden_dim, num_heads=4, feat_drop=dropout, attn_drop=dropout, residual=False, bias=False)
+        self.GAT2 = GATConv(in_feats=hidden_dim * 4, out_feats=hidden_dim, num_heads=2, feat_drop=dropout, attn_drop=dropout, residual=False, bias=False)
+        self.classifier = GenericMLP(pool_dim * 2 * hidden_dim, pool_dim * hidden_dim, out_dim, dropout)
 
         ####  Activation Functions  ####
         self.LeakyReLU = nn.LeakyReLU(negative_slope=0.01)
 
         ####  Normalization Layers  ####
-        self.GraphNormGAT1 = GraphNorm(hidden_dim * 4, eps=1e-5)
-        self.GraphNormGAT2 = GraphNorm(64 * 3, eps=1e-5)
+        self.GraphNormGAT1 = GraphNorm(hidden_dim, eps=1e-5)
+        self.GraphNormGAT2 = GraphNorm(hidden_dim, eps=1e-5)
+
+        #### Readout Layer ####
+        self.readout = SortPooling(k=pool_dim)
 
         ####  Dropout  ####
-        self.dropout = nn.Dropout(0.5)
+        self.dropout = nn.Dropout(dropout)
 
-    def forward(self, g, node_feats):
-        updated_feats = self.GAT1(g, node_feats)
-        updated_feats = updated_feats.flatten(1)
-        updated_feats = self.LeakyReLU(updated_feats)
+    def forward(self, mesh_graph, features):
+        updated_feats = self.GAT1(mesh_graph, features)
         updated_feats = self.GraphNormGAT1(updated_feats)
-        updated_feats = self.GAT2(g, updated_feats)
-        updated_feats = updated_feats.flatten(1)
         updated_feats = self.LeakyReLU(updated_feats)
+
+        readouts = self.readout(mesh_graph, updated_feats.mean(1))
+
+        updated_feats = updated_feats.flatten(1)
+
+        updated_feats = self.GAT2(mesh_graph, updated_feats)
         updated_feats = self.GraphNormGAT2(updated_feats)
-        updated_feats = self.GATclassifier(g, updated_feats)
-        updated_feats = updated_feats.mean(1)
-        with g.local_scope():
-            g.ndata['updated_feats'] = updated_feats
-            # Calculate graph representation by average readout.
-            updated_feats = dgl.mean_nodes(g, 'updated_feats')
-            updated_feats = self.dropout(updated_feats)
-            return self.classifier(updated_feats)
+        updated_feats = self.LeakyReLU(updated_feats)
 
-    def save(self, path):
-        torch.save(self.state_dict(), path)
+        readouts = torch.hstack((readouts, self.readout(mesh_graph, updated_feats.mean(1))))
 
-    def load(self, path):
-        self.load_state_dict(torch.load(path))
-        self.eval()
+        return self.classifier(readouts)
 
 
-class GraphMeshReader2GATLayer(nn.Module):
-    def __init__(self, in_feats, hidden_dim, out_feats, dropout):
-        super(GraphMeshReader2GATLayer, self).__init__()
+class GMReader2GATUniversalReadout(nn.Module):
+    def __init__(self, in_dim, hidden_dim, out_dim, dropout):
+        super(GMReader2GATUniversalReadout, self).__init__()
 
         ####  Layers  ####
-        self.GAT1 = GATConv(in_feats=in_feats, out_feats=hidden_dim, num_heads=4, feat_drop=dropout, attn_drop=dropout, residual=False, bias=False)
-        self.GAT2 = GATConv(in_feats=hidden_dim * 4, out_feats=32, num_heads=3, feat_drop=dropout, attn_drop=dropout, residual=False, bias=False)
-        self.GATclassifier = GATConv(in_feats=32 * 3, out_feats=32, num_heads=2, feat_drop=dropout, attn_drop=dropout, residual=False, bias=False)
-        self.classifier = nn.Linear(32, out_feats, bias=False)
+        self.GAT1 = GATConv(in_feats=in_dim, out_feats=hidden_dim, num_heads=4, feat_drop=dropout, attn_drop=dropout, residual=False, bias=False)
+        self.GAT2 = GATConv(in_feats=hidden_dim * 4, out_feats=hidden_dim, num_heads=2, feat_drop=dropout, attn_drop=dropout, residual=False, bias=False)
+        self.classifier = GenericMLP(hidden_dim, hidden_dim * 2, out_dim, dropout)
 
         ####  Activation Functions  ####
         self.LeakyReLU = nn.LeakyReLU(negative_slope=0.01)
 
         ####  Normalization Layers  ####
-        self.GraphNormGAT1 = GraphNorm(hidden_dim * 4, eps=1e-5)
-        self.GraphNormGAT2 = GraphNorm(32 * 3, eps=1e-5)
+        self.GraphNormGAT1 = GraphNorm(hidden_dim, eps=1e-5)
+        self.GraphNormGAT2 = GraphNorm(hidden_dim, eps=1e-5)
+
+        #### Readout Layer ####
+        self.readout1 = UniversalReadout(hidden_dim, hidden_dim * 2, int(hidden_dim / 2), dropout=0.05)
+        self.readout2 = UniversalReadout(hidden_dim, hidden_dim * 2, int(hidden_dim / 2), dropout=0.05)
 
         ####  Dropout  ####
-        self.dropout = nn.Dropout(0.5)
+        self.dropout = nn.Dropout(dropout)
 
-    def forward(self, g, node_feats):
-        updated_feats = self.GAT1(g, node_feats)
-        updated_feats = updated_feats.flatten(1)
-        updated_feats = self.LeakyReLU(updated_feats)
+    def forward(self, mesh_graph, features):
+        updated_feats = self.GAT1(mesh_graph, features)
         updated_feats = self.GraphNormGAT1(updated_feats)
-        updated_feats = self.GAT2(g, updated_feats)
-        updated_feats = updated_feats.flatten(1)
         updated_feats = self.LeakyReLU(updated_feats)
+
+        with mesh_graph.local_scope():
+            mesh_graph.ndata["readout"] = updated_feats.mean(1)
+            readouts = self.readout1(mesh_graph, "readout")
+
+        updated_feats = updated_feats.flatten(1)
+
+        updated_feats = self.GAT2(mesh_graph, updated_feats)
         updated_feats = self.GraphNormGAT2(updated_feats)
-        updated_feats = self.GATclassifier(g, updated_feats)
-        updated_feats = updated_feats.mean(1)
-        with g.local_scope():
-            g.ndata['updated_feats'] = updated_feats
-            # Calculate graph representation by average readout.
-            updated_feats = dgl.mean_nodes(g, 'updated_feats')
-            updated_feats = self.dropout(updated_feats)
-            return self.classifier(updated_feats)
+        updated_feats = self.LeakyReLU(updated_feats)
 
-    def save(self, path):
-        torch.save(self.state_dict(), path)
+        with mesh_graph.local_scope():
+            mesh_graph.ndata["readout"] = updated_feats.mean(1)
+            readouts = torch.hstack((readouts, self.readout2(mesh_graph, "readout")))
 
-    def load(self, path):
-        self.load_state_dict(torch.load(path))
-        self.eval()
+        return self.classifier(readouts)
 
 
-class GATMeshNetwork(nn.Module):
-    def __init__(self, patch_feat_dim=5, internal_hidden_dim=256, readout_dim=32, hidden_dim=256, out_feats=15, dropout=0.5):
-        super(GATMeshNetwork, self).__init__()
+def save(self, path):
+    torch.save(self.state_dict(), path)
 
-        ####  Layers  ####
-        self.patch_reader = PatchReader2GATLayer(patch_feat_dim, hidden_dim=internal_hidden_dim, out_feats=readout_dim, dropout=dropout)
-        self.mesh_reader = GraphMeshReader2GATLayer(readout_dim, hidden_dim=hidden_dim, out_feats=out_feats, dropout=dropout)
 
-        ####  Activation Functions  ####
-        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.01)
+def load(self, path):
+    self.load_state_dict(torch.load(path))
+    self.eval()
 
-        ####  Normalization Layers  ####
-        self.GraphNormPatchReader = GraphNorm(readout_dim, eps=1e-5)
+
+class GATMeshNetworkSRPR(nn.Module):
+    def __init__(self, readout_dim, hidden_dim, out_feats, dropout, mesh_graph_edge_weights=True):
+        super(GATMeshNetworkSRPR, self).__init__()
 
         ####  Variables  ####
+        self.name = "GATMeshNetworkSRPR"
         self.readout_dim = readout_dim
+        self.mesh_graph_edge_weights = mesh_graph_edge_weights
+
+        ####  Layers  ####
+        self.readout = SpiralReadout(readout_dim)
+        self.mesh_reader = GMReader2GATSortPoolReadout(in_dim=self.readout_dim, hidden_dim=hidden_dim, out_dim=out_feats, dropout=dropout, pool_dim=10)
 
     def forward(self, mesh_graph, patches, device):
         readouts = torch.empty((0, self.readout_dim), device=device)
-        dataloader = GraphDataLoader(patches, {"batch_size": 25, "drop_last": False})
-        for patch in dataloader:
-            readouts = torch.vstack((readouts, self.patch_reader(patch, patch.ndata["aggregated_feats"])))
-        readouts = self.LeakyReLU(readouts)
-        readouts = self.GraphNormPatchReader(readouts)
-        return self.mesh_reader(mesh_graph, readouts), readouts
+        # noinspection PyTypeChecker
+        dataloader = GraphDataLoader(patches, batch_size=int(mesh_graph.num_nodes() / 2), drop_last=False)
+        for spider_patch in dataloader:
+            readouts = torch.vstack((readouts, self.readout(spider_patch, "aggregated_feats")))
+        return self.mesh_reader(mesh_graph, readouts)
+
+    def save(self, path):
+        os.makedirs(path, exist_ok=True)
+        torch.save(self.state_dict(), path + "/network.pt")
+
+    def load(self, path):
+        self.load_state_dict(torch.load(path))
+        self.eval()
+
+
+class GATMeshNetworkSRUR(nn.Module):
+    def __init__(self, readout_dim, hidden_dim, out_feats, dropout, mesh_graph_edge_weights=True):
+        super(GATMeshNetworkSRUR, self).__init__()
+
+        ####  Variables  ####
+        self.name = "GATMeshNetworkSRUR"
+        self.readout_dim = readout_dim
+        self.mesh_graph_edge_weights = mesh_graph_edge_weights
+
+        ####  Layers  ####
+        self.readout = SpiralReadout(readout_dim)
+        self.mesh_reader = GMReader2GATUniversalReadout(in_dim=self.readout_dim, hidden_dim=hidden_dim, out_dim=out_feats, dropout=dropout)
+
+    def forward(self, mesh_graph, patches, device):
+        readouts = torch.empty((0, self.readout_dim), device=device)
+        # noinspection PyTypeChecker
+        dataloader = GraphDataLoader(patches, batch_size=int(mesh_graph.num_nodes() / 2), drop_last=False)
+        for spider_patch in dataloader:
+            readouts = torch.vstack((readouts, self.readout(spider_patch, "aggregated_feats")))
+
+        return self.mesh_reader(mesh_graph, readouts)
 
     def save(self, path):
         os.makedirs(path, exist_ok=True)

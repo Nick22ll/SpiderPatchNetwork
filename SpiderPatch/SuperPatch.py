@@ -25,7 +25,7 @@ class SuperPatch(dgl.DGLGraph):
 
         # Calculate ConcentricRing for resolution 0
         concentricRings = CSIRSv2Arbitrary(level_0, seed_point, radius, n_rings, n_points)
-        if not concentricRings.first_valid_rings(n_rings):
+        if not concentricRings.firstValidRings(n_rings):
             raise RuntimeError("A ConcentricRings is not complete!")
         self.concentricRings.append(concentricRings)
         self.seed_point = concentricRings.seed_point
@@ -115,7 +115,7 @@ class SuperPatch(dgl.DGLGraph):
 
             # Calculate the concentric ring to extract the features
             concentricRings = CSIRSv2Arbitrary(mesh, seed_point, radius, n_rings, n_points)
-            if not concentricRings.first_valid_rings(n_rings):
+            if not concentricRings.firstValidRings(n_rings):
                 raise RuntimeError("A ConcentricRings is not complete!")
             self.concentricRings.append(concentricRings)
             mesh_face_idx = concentricRings.getNonNaNFacesIdx()
@@ -170,7 +170,7 @@ class SuperPatch_preloaded(dgl.DGLGraph):
         radius = np.max(level_0.oriented_bounding_box["extent"]) * radius / 100
         # Calculate ConcentricRing for resolution 0
         concentricRings = CSIRSv2Arbitrary(level_0, seed_point, radius, n_rings, n_points)
-        if concentricRings is None or not concentricRings.first_valid_rings(n_rings):
+        if concentricRings is None or not concentricRings.firstValidRings(n_rings):
             raise RuntimeError("The ConcentricRings at resolution 0 is not complete!")
         self.concentricRings.append(concentricRings)
         self.seed_point = concentricRings.seed_point
@@ -257,7 +257,7 @@ class SuperPatch_preloaded(dgl.DGLGraph):
         for id, mesh in enumerate(sample_meshes[1:]):
             # Calculate the concentric ring to extract the features
             concentricRings = CSIRSv2Arbitrary(mesh, seed_point, radius, n_rings, n_points)
-            if concentricRings is None or not concentricRings.first_valid_rings(n_rings):
+            if concentricRings is None or not concentricRings.firstValidRings(n_rings):
                 raise RuntimeError(f"The ConcentricRings at resolution {id + 1} is not complete!")
             self.concentricRings.append(concentricRings)
             mesh_face_idx = concentricRings.getNonNaNFacesIdx()

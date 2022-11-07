@@ -1,41 +1,34 @@
 import multiprocessing
 import os
-import re
 import pickle
+import pickle as pkl
 import random
+import re
 import warnings
 
 import numpy as np
-import pickle as pkl
-from sklearn.metrics import pairwise_distances
-from tqdm import tqdm
 
-from Mesh import *
-from math import floor
-
-from Mesh.Mesh import Mesh
+from CSIRS.CSIRS import CSIRSv2Spiral
 from SHREC_Utils import subdivide_for_mesh
-from CSIRS.CSIRS import CSIRSv2, CSIRSv2Spiral
-from SpiderPatch.SpiderPatch import SpiderPatchLRF
-from SpiderPatch.SuperPatch import SuperPatch_preloaded
 
 DATASETS = {
     "SHREC17": ("../MeshDataset/SHREC17", ".off")
 }
 
 
-def generateConcRingDataset(to_extract="all", configurations=None, CSIRS_type=CSIRSv2Spiral):
+def generateConcRingDataset(to_extract="all", configurations=None, CSIRS_type=CSIRSv2Spiral, relative_radius=False):
     """
 
+    @param CSIRS_type:
     @param configurations:
     @param to_extract:
     @return:
     """
     warnings.filterwarnings("ignore", category=RuntimeWarning)
     if configurations is None:
-        configurations = np.array([[5, 4, 12], [5, 4, 6], [7, 4, 6], [10, 4, 6], [10, 7, 12]])
+        configurations = np.array([[10, 6, 8], [5, 4, 6]])  # [5, 4, 12], [10, 7, 12], [7, 4, 6],
 
-    conc_ring_per_mesh = 1000
+    conc_ring_per_mesh = 500
 
     meshes = subdivide_for_mesh(return_type="list")
     load_path = f"Datasets/Meshes/SHREC17"
@@ -47,7 +40,7 @@ def generateConcRingDataset(to_extract="all", configurations=None, CSIRS_type=CS
     if to_extract == "all":
         mesh_to_extract = meshes
     else:
-        mesh_to_extract = [meshes[i] for i in to_extract]
+        mesh_to_extract = to_extract
 
     mesh_remaining = len(mesh_to_extract)
 
@@ -66,42 +59,52 @@ def generateConcRingDataset(to_extract="all", configurations=None, CSIRS_type=CS
                 vertices_number = len(mesh.vertices)
                 # Under development uses a fixed seed points sequence
                 random.seed(666)
-                seed_point_sequence = list(np.unique(random.sample(range(vertices_number - 1), 4000)))
+                seed_point_sequence = list(np.unique(random.sample(range(vertices_number - 1), min(conc_ring_per_mesh * 2, int(vertices_number * 0.80)))))
                 random.shuffle(seed_point_sequence)
                 for config in configurations:
                     radius, rings, points = config
-                    boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil(1.2 * radius)))
+                    if relative_radius:
+                        radius = radius * mesh.edge_length
+                    boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil((1.2 * radius) / mesh.edge_length)))
                     # Generate N number of patches for a single mesh
                     processed_conc_rings = 1
                     concentric_rings_list = []
-
                     for seed_point in seed_point_sequence:
                         if processed_conc_rings % (conc_ring_per_mesh + 1) == 0:
                             break
 
                         if seed_point in boundary_vertices:
                             continue
-
                         concentric_rings = CSIRS_type(mesh, seed_point, radius, rings, points)
-                        if not concentric_rings.first_valid_rings(2):
+                        if not concentric_rings.firstValidRings(2):
                             continue
-
                         concentric_rings_list.append(concentric_rings)
                         processed_conc_rings += 1
+                    if relative_radius:
+                        radius, rings, points = config
+                        os.makedirs(f"{save_path}_RR{radius}_R{rings}_P{points}_{str(CSIRS_type.__name__)}", exist_ok=True)
+                        os.makedirs(f'{save_path}_RR{radius}_R{rings}_P{points}_{str(CSIRS_type.__name__)}/{label}', exist_ok=True)
+                        os.makedirs(f'{save_path}_RR{radius}_R{rings}_P{points}_{str(CSIRS_type.__name__)}/{label}/{id}', exist_ok=True)
+                        os.makedirs(f'{save_path}_RR{radius}_R{rings}_P{points}_{str(CSIRS_type.__name__)}/{label}/{id}/{resolution_level}', exist_ok=True)
+                        mesh_id = re.sub(r"\D", "", mesh_id)
+                        with open(f'{save_path}_RR{radius}_R{rings}_P{points}_{str(CSIRS_type.__name__)}/{label}/{id}/{resolution_level}/concRing{mesh_id}.pkl', 'wb') as file:
+                            pickle.dump(concentric_rings_list, file, protocol=-1)
+                    else:
+                        os.makedirs(f"{save_path}_R{radius}_R{rings}_P{points}_{str(CSIRS_type.__name__)}", exist_ok=True)
+                        os.makedirs(f'{save_path}_R{radius}_R{rings}_P{points}_{str(CSIRS_type.__name__)}/{label}', exist_ok=True)
+                        os.makedirs(f'{save_path}_R{radius}_R{rings}_P{points}_{str(CSIRS_type.__name__)}/{label}/{id}', exist_ok=True)
+                        os.makedirs(f'{save_path}_R{radius}_R{rings}_P{points}_{str(CSIRS_type.__name__)}/{label}/{id}/{resolution_level}', exist_ok=True)
+                        mesh_id = re.sub(r"\D", "", mesh_id)
+                        with open(f'{save_path}_R{radius}_R{rings}_P{points}_{str(CSIRS_type.__name__)}/{label}/{id}/{resolution_level}/concRing{mesh_id}.pkl', 'wb') as file:
+                            pickle.dump(concentric_rings_list, file, protocol=-1)
 
-                    os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}", exist_ok=True)
-                    os.makedirs(f'{save_path}_R{radius}_RI{rings}_P{points}/{label}', exist_ok=True)
-                    os.makedirs(f'{save_path}_R{radius}_RI{rings}_P{points}/{label}/{id}', exist_ok=True)
-                    os.makedirs(f'{save_path}_R{radius}_RI{rings}_P{points}/{label}/{id}/{resolution_level}', exist_ok=True)
-                    mesh_id = re.sub(r"\D", "", mesh_id)
-                    with open(f'{save_path}_R{radius}_RI{rings}_P{points}/{label}/{id}/{resolution_level}/concRing{mesh_id}.pkl', 'wb') as file:
-                        pickle.dump(concentric_rings_list, file, protocol=-1)
 
-
-def parallelGenerateConcRingDataset(to_extract=None):
+def parallelGenerateConcRingDataset(to_extract=None, configurations=None, relative_radius=False):
     if to_extract is None:
         to_extract = subdivide_for_mesh(return_type="list")
-    thread_num = 6
-    pool = multiprocessing.Pool(processes=thread_num)
+    thread_num = 13
     mesh_for_thread = int(len(to_extract) / thread_num)
-    pool.map(generateConcRingDataset, [l for l in [to_extract[i * mesh_for_thread: (i * mesh_for_thread) + mesh_for_thread] for i in range(thread_num)]])
+    pool = multiprocessing.Pool(processes=thread_num)
+    pool.starmap(generateConcRingDataset, [(to_extract[i * mesh_for_thread: (i * mesh_for_thread) + mesh_for_thread], configurations, CSIRSv2Spiral, relative_radius) for i in range(thread_num)])
+
+    # pool.map(generateConcRingDataset, [l for l in [to_extract[i * mesh_for_thread: (i * mesh_for_thread) + mesh_for_thread] for i in range(thread_num)]])

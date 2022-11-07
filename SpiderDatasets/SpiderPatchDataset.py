@@ -1,6 +1,7 @@
 import warnings
 import gc
 
+import dgl
 import numpy as np
 from dgl.data import DGLDataset
 import os
@@ -9,12 +10,14 @@ import torch
 from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
 
+from SpiderPatch.SpiderPatch import SpiderPatch
+
 
 class SpiderPatchDataset(DGLDataset):
     def __init__(self, dataset_name="", graphs=None, labels=None):
-        self.graphs = graphs
-        self.labels = labels
-        self.seed_point_indices = None
+        self.graphs = np.array(graphs)
+        self.labels = np.array(labels)
+        self.seed_point_indices = np.empty(0)
         super().__init__(name=dataset_name)
 
     def process(self):
@@ -174,14 +177,13 @@ class SpiderPatchDataset(DGLDataset):
 
     def selectGraphsByNumNodes(self, num_nodes):
         to_delete = []
-        for id, graph in enumerate(self.graphs):
+        for id, graph in tqdm(enumerate(self.graphs), position=0, leave=True, desc=f"Aggregating edge features: ", colour="white", ncols=80):
             if graph.num_nodes() != num_nodes:
                 to_delete.append(id)
         to_delete = np.sort(to_delete)
-
-        for i in range(len(to_delete) - 1, -1, -1):
-            self.graphs.pop(to_delete[i])
-            self.labels.pop(to_delete[i])
+        if to_delete != []:
+            self.graphs = np.delete(self.graphs, to_delete)
+            self.labels = np.delete(self.labels, to_delete)
 
     def save_to(self, save_path=None):
         os.makedirs(save_path, exist_ok=True)

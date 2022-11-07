@@ -6,18 +6,21 @@ from sklearn.metrics import pairwise_distances
 from GeometricUtils import faceArea, LRF
 import open3d as o3d
 import dgl.data
-import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
 
 
 class SpiderPatch(dgl.DGLGraph):
-    def __init__(self, concentricRings, mesh, seed_point):
+    def __init__(self, concentricRings, mesh, seed_point, seed_point_idx=True):
         """
         Constructs a Patch object (that it is a bidirectional DGLGraph object) from a ConcentricRings object following a spyder pattern
         @param concentricRings:
         """
-        self.seed_point = mesh.vertices[seed_point]
+        WEIGHT_DECAY = 0.1  # TODO Valutare questo nuovo iperparametro
+
+        if seed_point_idx:
+            self.seed_point = mesh.vertices[seed_point]
+        else:
+            self.seed_point = seed_point
         self.rings = len(concentricRings)
         self.points_per_ring = len(concentricRings[0])
 
@@ -36,7 +39,8 @@ class SpiderPatch(dgl.DGLGraph):
                         adjacent_node_id = (current_node + 1) % concentricRings[ring].getElementsNumber()
                         start_nodes = np.hstack((start_nodes, [current_node], [adjacent_node_id]))
                         end_nodes = np.hstack((end_nodes, [adjacent_node_id], [current_node]))
-                        node_distances = np.hstack((node_distances, np.tile(0.75, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(next_elem_same_ring - concentricRings[ring][elem]), 2)))
+                        edge_weight = 1 * pow((1 - WEIGHT_DECAY), ring)
+                        node_distances = np.hstack((node_distances, np.tile(edge_weight, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(next_elem_same_ring - concentricRings[ring][elem]), 2)))
                         first_ring_nodes_id = np.hstack((first_ring_nodes_id, current_node))
                     else:
                         # Check if the next element in the ring is not NaN
@@ -48,7 +52,8 @@ class SpiderPatch(dgl.DGLGraph):
                             start_nodes = np.hstack((start_nodes, [current_node], [adjacent_node_id]))
                             end_nodes = np.hstack((end_nodes, [adjacent_node_id], [current_node]))
                             # do all'edge peso pari a 0.75 essendo un edge di collegamento tra due nodi sullo stesso anello
-                            node_distances = np.hstack((node_distances, np.tile(0.75, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(next_elem_same_ring - concentricRings[ring][elem]), 2)))
+                            edge_weight = 0.85 * pow((1 - WEIGHT_DECAY), ring)
+                            node_distances = np.hstack((node_distances, np.tile(edge_weight, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(next_elem_same_ring - concentricRings[ring][elem]), 2)))
 
                     if ring < concentricRings.getRingsNumber() - 1:  # If not last ring
                         if any(~np.isnan(concentricRings[(ring + 1)][elem])):  # Controllo che il nodo nella stessa posizione del nodo corrente ma nell'anello successivo sia NON nan
@@ -57,7 +62,8 @@ class SpiderPatch(dgl.DGLGraph):
                             start_nodes = np.hstack((start_nodes, [current_node], [outer_node_id]))
                             end_nodes = np.hstack((end_nodes, [outer_node_id], [current_node]))
                             # do all'edge peso pari a 1 essendo un edge di collegamento tra due nodi su anelli diversi
-                            node_distances = np.hstack((node_distances, np.tile(1, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(concentricRings[(ring + 1)][elem] - concentricRings[ring][elem]), 2)))
+                            edge_weight = 1 * pow((1 - WEIGHT_DECAY), ring)
+                            node_distances = np.hstack((node_distances, np.tile(edge_weight, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(concentricRings[(ring + 1)][elem] - concentricRings[ring][elem]), 2)))
 
         # Add the center of the patch
         start_nodes = start_nodes + 1

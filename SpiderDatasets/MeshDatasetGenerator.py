@@ -1,20 +1,9 @@
 import multiprocessing
 import os
 import pickle
-import random
-import numpy as np
-
-from sklearn.metrics import pairwise_distances
-from tqdm import tqdm
-
-from Mesh import *
-from math import floor
 
 from Mesh.Mesh import Mesh
 from SHREC_Utils import subdivide_for_mesh
-from CSIRS.CSIRS import CSIRSv2
-from SpiderPatch.SpiderPatch import SpiderPatchLRF
-from SpiderPatch.SuperPatch import SuperPatch_preloaded
 
 DATASETS = {
     "SHREC17": ("../MeshDataset/SHREC17", ".off")

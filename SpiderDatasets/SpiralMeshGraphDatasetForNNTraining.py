@@ -153,7 +153,7 @@ class SpiralMeshGraphDatasetForNNTraining:
             feat_names = self.getPatchEdgeFeatsNames()
 
         for dataset in [self.train_dataset, self.validation_dataset, self.test_dataset]:
-            dataset.aggregateEdgeFeatures(feat_names)
+            dataset.aggregateSpiderPatchEdgeFeatures(feat_names)
 
         return self.train_dataset.graphs[0].patches[0].edata["weights"].shape
 

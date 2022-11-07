@@ -5,8 +5,8 @@ import numpy as np
 import torch
 from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
 
-from Networks.SpiralNetworks import SpiralMeshReader
-from PlotUtils import plot_confusion_matrix, save_confusion_matrix
+from Networks.SpiralNetworks import SpiralMeshReader, SperimentalSpiralMeshReader, Sperimental2SpiralMeshReader
+from PlotUtils import plot_confusion_matrix, save_confusion_matrix, plot_training_statistics
 from sklearn import metrics
 import torch.nn.functional as F
 from tqdm import tqdm, trange
@@ -19,28 +19,43 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     ###### TRAIN DI UN MODELLO SU 4 RISOLUZIONI DI UN DATASET  #########
+    concRing_config = "R7_RI4_P6"
+    graph_per_mesh = 50
+    conc_per_graph = 20
+    connection = "3"
+    resolution_level = "LEVEL0"
     dataset = SpiralMeshGraphDatasetForNNTraining()
-    dataset.load(f"../Datasets/SpiralMeshGraphsForTraining/SHREC17_R5_RI4_P12_SPIRAL20_SAMPLE20/SHREC17_R5_RI4_P12_SPIRAL20_SAMPLE20_CONN5_Normalized", f"SHREC17_R5_RI4_P12_SPIRAL20_SAMPLE20_CONN5")
+    dataset.load(f"../Datasets/SpiralMeshGraphsForTraining/SHREC17_{concRing_config}_{resolution_level}_SPIRAL{conc_per_graph}_SAMPLE{graph_per_mesh}/SHREC17_{concRing_config}_{resolution_level}_SPIRAL{conc_per_graph}_SAMPLE{graph_per_mesh}_CONN{connection}_NONORM",
+                 f"SHREC17_{concRing_config}_{resolution_level}_SPIRAL{conc_per_graph}_SAMPLE{graph_per_mesh}_CONN{connection}")
 
     print(dataset.train_dataset.graphs[0].node_attr_schemes())
-    dataset.aggregateNodeFeatures(["gauss_curvature", "mean_curvature", "curvedness", "K2", "local_depth"])
+    features = np.array(["gauss_curvature", "mean_curvature", "curvedness", "K2", "local_depth"])
+    features_to_keep = [0, 1, 2, 3, 4]
+    dataset.aggregateNodeFeatures(features[features_to_keep])
     dataset.removeNonAggregatedFeatures()
-    dataset.train_dataset.graphs[0].draw()
+    dataset.normalize()
+    dataset.normalize_validation_dataset()
     print(dataset.train_dataset.graphs[0].node_attr_schemes())
     dataset.to(device)
 
-    model = SpiralMeshReader(in_dim=dataset.train_dataset.graphs[0].ndata["aggregated_feats"].shape[1], hidden_dim=10192, out_dim=15)
+    # in_dim = dataset.train_dataset.graphs[0].ndata["aggregated_feats"].shape[1]
+    # model = SpiralMeshReader(in_dim=in_dim, hidden_dim=int(in_dim * 3), out_dim=15)
+    # model = SperimentalSpiralMeshReader(in_dim=in_dim, hidden_dim=int(in_dim * 3), mlp_hidden_dim=in_dim*3, out_dim=15)
+    in_dim = dataset.train_dataset.graphs[0].ndata["aggregated_feats"].shape[1] * 3
+    model = Sperimental2SpiralMeshReader(in_dim=in_dim, mlp_hidden_dim=int(in_dim * 6), out_dim=15)
+    model.load(f"U:\AssegnoDiRicerca\PythonProject\TrainedModelsSpiral\Train_SHREC17_{concRing_config}_{resolution_level}_SPIRAL{conc_per_graph}_SAMPLE{graph_per_mesh}_CONN{connection}/network.pt")
     model.to(device)
 
-    trainMeshNetwork(model, dataset, 150, f"SHREC17_R5_RI4_P12_SPIRAL20_SAMPLE20_CONN5", dataset.validation_dataset)
+    trainMeshNetwork(model, dataset, 50, f"SHREC17_{concRing_config}_{resolution_level}_SPIRAL{conc_per_graph}_SAMPLE{graph_per_mesh}_CONN{connection}", dataset.validation_dataset)
 
 
 def trainMeshNetwork(model, dataset, epochs=1000, train_name="", test_dataset=None):
     model.train()
     best_acc = 0
+    best_loss = 1000
 
-    dataloader = GraphDataLoader(dataset.train_dataset, batch_size=5, drop_last=False)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=10e-4)
+    dataloader = GraphDataLoader(dataset.dataset, batch_size=1, drop_last=False)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-6, weight_decay=10e-4)
     scheduler = MultiStepLR(optimizer, milestones=[int(epochs * 0.65), int(epochs * 0.90)], gamma=0.1)
     start = time()
     train_losses = []
@@ -52,12 +67,12 @@ def trainMeshNetwork(model, dataset, epochs=1000, train_name="", test_dataset=No
             print(f"Learning rate of group {id}: {group['lr']}")
         for graph, label in tqdm(dataloader, position=0, leave=False, desc=f"Epoch {epoch + 1}: ", colour="white", ncols=80):
             optimizer.zero_grad()
-            pred = model(graph, None)
+            pred = model(graph)  # , None
             loss_running = F.cross_entropy(pred, label)
             train_losses[-1] += loss_running.item()
             loss_running.backward()
             optimizer.step()
-        train_losses[-1] /= len(dataset.train_dataset.graphs)
+        train_losses[-1] /= len(dataset.dataset.graphs)
         print(f"Epoch {epoch + 1}/{epochs} ({int(time() - start)}s):"
               f" Epoch Loss={train_losses[-1]:.3f}")
 
@@ -73,9 +88,13 @@ def trainMeshNetwork(model, dataset, epochs=1000, train_name="", test_dataset=No
 
         if acc > best_acc:
             best_acc = acc
+            best_loss = loss
             model.save(f"../TrainedModelsSpiral/Train_{train_name}")
             save_confusion_matrix(cm, f"../TrainedModelsSpiral/Train_{train_name}/ConfusionMatrix.png")
         scheduler.step()
+        plot_training_statistics(path=f"../TrainedModelsSpiral/Train_{train_name}", filename=f"{train_name}_statistics.png", title=f"Best Acc: {np.trunc(best_acc * 10000) / 100}, Loss: {best_loss}", epochs=range(epoch + 1), val_epochs=range(epoch + 1), losses=train_losses,
+                                 val_accuracies=val_accuracies,
+                                 val_losses=val_losses)
 
 
 def testMeshNetwork(model, dataset):
@@ -84,7 +103,7 @@ def testMeshNetwork(model, dataset):
     loss_predicted = np.empty((0, dataset.numClasses()))
     dataloader = GraphDataLoader(dataset, batch_size=20, drop_last=False)
     for graph, label in dataloader:
-        pred = model(graph, None)
+        pred = model(graph)  # , None
         pred = pred.cpu()
         correct_prediction_number = np.hstack((correct_prediction_number, pred.argmax(dim=1)))  # Take the highest value in the predicted classes vector
         loss_predicted = np.vstack((loss_predicted, pred.detach().numpy()))

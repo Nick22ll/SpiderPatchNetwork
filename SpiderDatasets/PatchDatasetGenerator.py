@@ -2,6 +2,10 @@ import multiprocessing
 import os
 import pickle
 import random
+import re
+import warnings
+
+import dgl
 import numpy as np
 
 from sklearn.metrics import pairwise_distances
@@ -13,7 +17,7 @@ from math import floor
 from Mesh.Mesh import Mesh
 from SHREC_Utils import subdivide_for_mesh
 from CSIRS.CSIRS import CSIRSv2
-from SpiderPatch.SpiderPatch import SpiderPatchLRF
+from SpiderPatch.SpiderPatch import SpiderPatchLRF, SpiderPatch
 from SpiderPatch.SuperPatch import SuperPatch_preloaded
 
 DATASETS = {
@@ -21,85 +25,38 @@ DATASETS = {
 }
 
 
-def parallelGeneratePatchDataset(to_extract="all"):
-    """
+def generateSPDatasetFromConcRings(concRings_path, valid_rings=2):
+    warnings.filterwarnings("ignore")
+    mesh_path = concRings_path.replace("ConcentricRings", "Meshes")
+    mesh_path = mesh_path.replace(mesh_path[mesh_path.find("SHREC17"):], "SHREC17")
 
-    @param mesh_dataset:
-    @param save_path:
-    @param configurations:
-    @param to_extract:
-    @param patch_per_mesh:
-    @return:
-    """
+    for label in tqdm(os.listdir(concRings_path), position=0, leave=False, desc=f"Label: ", colour="white", ncols=80):
+        for id in tqdm(os.listdir(f"{concRings_path}/{label}"), position=0, leave=False, desc=f"ID: ", colour="white", ncols=80):
+            for resolution_level in tqdm(os.listdir(f"{concRings_path}/{label}/{id}"), position=0, leave=False, desc=f"Resolution Level: ", colour="white", ncols=80):
+                conc_filename = os.listdir(f"{concRings_path}/{label}/{id}/{resolution_level}")[0]
+                mesh_filename = conc_filename.replace("concRing", "mesh")
 
-    configurations = np.array([[10, 3, 4], [10, 6, 6]])
-    patch_per_mesh = 1000
+                with open(f"{mesh_path}/{label}/{id}/{resolution_level}/{mesh_filename}", "rb") as mesh_file:
+                    mesh = pickle.load(mesh_file)
 
-    meshes = subdivide_for_mesh()
-    extension = DATASETS["SHREC17"][1]
-    load_path = f"{DATASETS['SHREC17'][0]}/PatternDB/"
-    save_path = f"Datasets/Patches/SHREC17"
+                with open(f"{concRings_path}/{label}/{id}/{resolution_level}/{conc_filename}", "rb") as file:
+                    conc_rings = pickle.load(file)
 
-    # Iterate over meshes of the mesh dataset
-    print(f"Generation of patches STARTED!")
-
-    if to_extract == "all":
-        mesh_to_extract = meshes
-    else:
-        mesh_to_extract = [meshes[i] for i in to_extract]
-
-    for sample_id, sample in enumerate(mesh_to_extract):
-        print(f"Generation of patches on sample {to_extract[sample_id]} STARTED!")
-        for level, tup in sample.items():
-            mesh_id = tup[0]
-            label = tup[1]
-            mesh = Mesh()
-            mesh.load(f"{load_path}{mesh_id}{extension}")
-            if not mesh.has_curvatures():
-                mesh.computeCurvatures(radius=7)
-            vertices_number = len(mesh.vertices)
-            max_radius = np.max(configurations[:, 0]) / np.min(configurations[:, 1])
-            boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil(1.5 * max_radius)))
-            # Under development uses a fixed seed points sequence
-            random.seed(666)
-            seed_point_sequence = list(np.unique(random.sample(range(vertices_number - 1), 4000)))
-            random.shuffle(seed_point_sequence)
-            for config in configurations:
-                radius, rings, points = config
-                # Generate N number of patches for a single mesh
-                processed_patch = 1
-                patches = []
-                concentric_rings_list = []
-                for seed_point in seed_point_sequence:
-                    if processed_patch % (patch_per_mesh + 1) == 0:
-                        break
-
-                    if seed_point in boundary_vertices:
+                spider_patches = []
+                for conc_ring in tqdm(conc_rings, position=0, leave=False, desc=f"Concentric Rings: ", colour="white", ncols=80):
+                    if not conc_ring.firstValidRings(valid_rings):
                         continue
-
-                    concentric_rings = CSIRSv2(mesh, seed_point, radius, rings, points)
-                    if not concentric_rings.first_valid_rings(2):
+                    try:
+                        spider_patches.append(SpiderPatch(conc_ring, mesh, conc_ring.seed_point, seed_point_idx=False))
+                    except dgl.DGLError:
                         continue
-
-                    patch = SpiderPatch(concentric_rings, mesh, seed_point)
-                    patches.append(patch)
-
-                    concentric_rings_list.append(concentric_rings)
-                    processed_patch += 1
-
-                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}", exist_ok=True)
-                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}/class_{str(label)}", exist_ok=True)
-                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}", exist_ok=True)
-                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}/resolution_{level}", exist_ok=True)
-                with open(f"{save_path}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}/resolution_{level}/patches{mesh_id}.pkl", 'wb') as file:
-                    pickle.dump(patches, file, protocol=-1)
-
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}", exist_ok=True)
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/class_{str(label)}", exist_ok=True)
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}", exist_ok=True)
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}/resolution_{level}", exist_ok=True)
-                with open(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}/resolution_{level}/patches{mesh_id}.pkl", 'wb') as file:
-                    pickle.dump(patches, file, protocol=-1)
+                save_path = concRings_path.replace('ConcentricRings', 'SpiderPatches')
+                os.makedirs(f"{save_path}", exist_ok=True)
+                os.makedirs(f"{save_path}/{label}", exist_ok=True)
+                os.makedirs(f"{save_path}/{label}/{id}", exist_ok=True)
+                os.makedirs(f"{save_path}/{label}/{id}/{resolution_level}", exist_ok=True)
+                with open(f"{save_path}/{label}/{id}/{resolution_level}/{conc_filename.replace('concRing', 'spiderPatches')}", 'wb') as file:
+                    pickle.dump(spider_patches, file, protocol=-1)
 
 
 def parallelGenerateLRFPatchDataset(to_extract="all"):
@@ -159,7 +116,7 @@ def parallelGenerateLRFPatchDataset(to_extract="all"):
                         continue
 
                     concentric_rings = CSIRSv2(mesh, seed_point, radius, rings, points)
-                    if not concentric_rings.first_valid_rings(2):
+                    if not concentric_rings.firstValidRings(2):
                         continue
 
                     patch = SpiderPatchLRF(concentric_rings, mesh, seed_point, radius)
@@ -175,11 +132,11 @@ def parallelGenerateLRFPatchDataset(to_extract="all"):
                 with open(f"{save_path}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}/resolution_{level}/patches{mesh_id}.pkl", 'wb') as file:
                     pickle.dump(patches, file, protocol=-1)
 
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}", exist_ok=True)
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/class_{str(label)}", exist_ok=True)
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}", exist_ok=True)
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}/resolution_{level}", exist_ok=True)
-                with open(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}/resolution_{level}/patches{mesh_id}.pkl", 'wb') as file:
+                os.makedirs(f"{save_path.replace('SpiderPatches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}", exist_ok=True)
+                os.makedirs(f"{save_path.replace('SpiderPatches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/class_{str(label)}", exist_ok=True)
+                os.makedirs(f"{save_path.replace('SpiderPatches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}", exist_ok=True)
+                os.makedirs(f"{save_path.replace('SpiderPatches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}/resolution_{level}", exist_ok=True)
+                with open(f"{save_path.replace('SpiderPatches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}/resolution_{level}/patches{mesh_id}.pkl", 'wb') as file:
                     pickle.dump(patches, file, protocol=-1)
 
 
@@ -255,85 +212,6 @@ def generateSuperPatchDataset(to_extract="all"):
             os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}", exist_ok=True)
             with open(f"{save_path}_R{radius}_RI{rings}_P{points}/class_{str(label)}/id_{to_extract[sample_id]}/patches{mesh_id}.pkl", 'wb') as file:
                 pickle.dump(super_patches_list, file, protocol=-1)
-
-
-def generatePatchDataset(mesh_dataset="SHREC17", save_path="", configurations=None, to_extract="all", patch_per_mesh=1000):
-    """
-
-    @param mesh_dataset:
-    @param save_path:
-    @param configurations:
-    @param to_extract:
-    @param patch_per_mesh:
-    @return:
-    """
-    if configurations is None:
-        configurations = np.array([[10, 3, 4], [10, 6, 6]])
-
-    if mesh_dataset == "SHREC17":
-        meshes = subdivide_for_mesh()
-        extension = DATASETS["SHREC17"][1]
-        load_path = f"{DATASETS['SHREC17'][0]}/PatternDB/"
-        save_path = save_path + f"Datasets/Patches/SHREC17"
-    else:
-        raise Exception("Dataset NOT Found!")
-
-    # Iterate over meshes of the mesh dataset
-    print(f"Generation of {mesh_dataset} patches STARTED!")
-    if to_extract == "all":
-        mesh_to_extract = meshes
-    else:
-        mesh_to_extract = [meshes[i] for i in to_extract]
-
-    for sample_id, sample in tqdm(enumerate(mesh_to_extract), position=0, leave=True, desc=f"Calculating Mesh: ", colour="green", ncols=120):
-        for level, tup in sample.items():
-            mesh_id = tup[0]
-            label = tup[1]
-            mesh = Mesh()
-            mesh.load(f"{load_path}{mesh_id}{extension}")
-            if not mesh.has_curvatures():
-                mesh.computeCurvatures(radius=7)
-            vertices_number = len(mesh.vertices)
-            max_radius = np.max(configurations[:, 0]) / np.min(configurations[:, 1])
-            boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil(1.5 * max_radius)))
-            # Under development uses a fixed seed points sequence
-            random.seed(666)
-            seed_point_sequence = list(np.unique(random.sample(range(vertices_number - 1), 4000)))
-            random.shuffle(seed_point_sequence)
-            for config in tqdm(configurations, position=0, leave=True, desc=f"Mesh ID {mesh_id}: ", colour="white", ncols=80):
-                radius, rings, points = config
-                # Generate N number of patches for a single mesh
-                processed_patch = 1
-                patches = []
-                concentric_rings_list = []
-                for seed_point in seed_point_sequence:
-                    if processed_patch % (patch_per_mesh + 1) == 0:
-                        break
-
-                    if seed_point in boundary_vertices:
-                        continue
-
-                    concentric_rings = CSIRSv2(mesh, seed_point, radius, rings, points)
-                    if not concentric_rings.first_valid_rings(2):
-                        continue
-
-                    patch = SpiderPatch(concentric_rings, mesh, seed_point)
-                    patches.append(patch)
-
-                    concentric_rings_list.append(concentric_rings)
-                    processed_patch += 1
-                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}", exist_ok=True)
-                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}/{to_extract[sample_id]}", exist_ok=True)
-                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}/{to_extract[sample_id]}/{level}", exist_ok=True)
-                os.makedirs(f"{save_path}_R{radius}_RI{rings}_P{points}/{to_extract[sample_id]}/{level}/{str(label)}", exist_ok=True)
-                with open(f"{save_path}_R{radius}_RI{rings}_P{points}/{to_extract[sample_id]}/{level}/{str(label)}/patches{mesh_id}.pkl", 'wb') as file:
-                    pickle.dump(patches, file, protocol=-1)
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}", exist_ok=True)
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/{to_extract[sample_id]}", exist_ok=True)
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/{to_extract[sample_id]}/{level}/", exist_ok=True)
-                os.makedirs(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/{to_extract[sample_id]}/{level}/{str(label)}", exist_ok=True)
-                with open(f"{save_path.replace('Patches', 'ConcentricRings')}_R{radius}_RI{rings}_P{points}/{to_extract[sample_id]}/{level}/{str(label)}/concentric_rings{mesh_id}.pkl", 'wb') as file:
-                    pickle.dump(concentric_rings_list, file, protocol=-1)
 
 
 def getSHREC17MeshClasses():
