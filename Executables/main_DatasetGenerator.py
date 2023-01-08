@@ -5,6 +5,7 @@ import re
 import numpy
 
 from SpiderDatasets.ConcRingsDatasetGenerator import parallelGenerateConcRingDataset, generateConcRingDataset
+from SpiderDatasets.MeshDatasetGenerator import parallelGenerateMeshDataset, generateMeshDataset
 from SpiderDatasets.MeshGraphDataset import MeshGraphDataset
 from SpiderDatasets.PatchDatasetGenerator import generateSPDatasetFromConcRings
 from SpiderDatasets.SpiralMehGraphDataset import SpiralMeshGraphDataset
@@ -43,24 +44,25 @@ def generateSpiralMeshGraphDatasetForNNTraining(mesh_dataset_path):
 
 
 def main():
+    # generateSPDatasetFromConcRings("Datasets/ConcentricRings/SHREC17_R0.05_R6_P8_CSIRSv2Spiral", valid_rings=2)
     # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R15_R4_P6_CSIRSv2Spiral", 50, 25, "level_3", 2, None, "SHREC17_R15_R4_P68_CSIRSv2Spiral_MGRAPHS50_SPIDER25_CONN2_RES3")
-    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R4_P6_CSIRSv2Spiral", 5, 100, "level_3", 0 , None, "SHREC17_R10_R4_P6_CSIRSv2Spiral_MGRAPHS5_SPIDER100_FC_RES3")
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R0.05_R6_P8_CSIRSv2Spiral", 25, 75, "level_3", 5, None, "SHREC17_R0.05_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER75_CONN5_RES3")
     # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R4_P6_CSIRSv2Spiral", 20, 100, "level_3", 0, None, "SHREC17_R10_R4_P6_CSIRSv2Spiral_MGRAPHS20_SPIDER100_CONNFC_RES3")
     # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R4_P6_CSIRSv2Spiral", 40, 25, "level_3", 5, None, "SHREC17_R10_R4_P6_CSIRSv2Spiral_MGRAPHS40_SPIDER25_CONN5_RES3")
     # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R4_P6_CSIRSv2Spiral", 40, 25, "level_3", 0, None, "SHREC17_R10_R4_P6_CSIRSv2Spiral_MGRAPHS40_SPIDER25_FC_RES3")
 
-    to_exclude = []
-    load_path = f"U:\AssegnoDiRicerca\PythonProject\Datasets\ConcentricRings\SHREC17_R10_R8_P10_CSIRSv2Spiral"
-    for label in os.listdir(load_path):
-        for id in os.listdir(f"{load_path}/{label}"):
-            for resolution_level in os.listdir(f"{load_path}/{label}/{id}"):
-                mesh_id = os.listdir(f"{load_path}/{label}/{id}/{resolution_level}")[0]
-                file_bytes = os.path.getsize(f"{load_path}/{label}/{id}/{resolution_level}/{mesh_id}")
-                if resolution_level == "resolution_level_3":
-                    with open(f"{load_path}/{label}/{id}/{resolution_level}/{mesh_id}", "rb") as mesh_file:
-                        concRings = pickle.load(mesh_file)
-                        if len(concRings) > 400:
-                            to_exclude.append(int(re.sub(r"\D", "", mesh_id)))
+    # to_exclude = []
+    # load_path = f"U:\AssegnoDiRicerca\PythonProject\Datasets\ConcentricRings\SHREC17_R15_R4_P6_CSIRSv2Spiral"
+    # for label in os.listdir(load_path):
+    #     for id in os.listdir(f"{load_path}/{label}"):
+    #         for resolution_level in os.listdir(f"{load_path}/{label}/{id}"):
+    #             mesh_id = os.listdir(f"{load_path}/{label}/{id}/{resolution_level}")[0]
+    #             file_bytes = os.path.getsize(f"{load_path}/{label}/{id}/{resolution_level}/{mesh_id}")
+    #             if resolution_level == "resolution_level_3":
+    #                 with open(f"{load_path}/{label}/{id}/{resolution_level}/{mesh_id}", "rb") as mesh_file:
+    #                     concRings = pickle.load(mesh_file)
+    #                     if len(concRings) > 400:
+    #                         to_exclude.append(int(re.sub(r"\D", "", mesh_id)))
     # #
     to_extract = []
     load_path = f"U:\AssegnoDiRicerca\PythonProject\Datasets\Meshes\SHREC17"
@@ -68,20 +70,27 @@ def main():
         for id in os.listdir(f"{load_path}/{label}"):
             for resolution_level in os.listdir(f"{load_path}/{label}/{id}"):
                 mesh_id = os.listdir(f"{load_path}/{label}/{id}/{resolution_level}")[0]
-                if resolution_level == "resolution_level_3" and int(re.sub(r"\D", "", mesh_id)) not in to_exclude:
+                if resolution_level == "resolution_level_3" and int(re.sub(r"\D", "", mesh_id)):  # not in to_exclude
                     to_extract.append(int(re.sub(r"\D", "", mesh_id)))
                     # with open(f"{load_path}/{label}/{id}/{resolution_level}/{mesh_id}", "rb") as mesh_file:
                     #     mesh = pickle.load(mesh_file)
                     #     print(f"Class: {label} ID: {mesh_id}, BB: {mesh.oriented_bounding_box['extent']}")
 
-    generateConcRingDataset(to_extract, configurations=numpy.array([[10, 8, 10]]), relative_radius=False)
-    generateSPDatasetFromConcRings("Datasets/ConcentricRings/SHREC17_R10_R8_P10_CSIRSv2Spiral", )
-    generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R8_P10_CSIRSv2Spiral", 50, 25, "level_3", 2, None, "SHREC17_R10_R8_P10_CSIRSv2Spiral_MGRAPHS50_SPIDER25_CONN2_RES3")
+    # generateConcRingDataset(to_extract, configurations=numpy.array([[0.05, 6, 8]]), relative_radius=False, normalized=True)
 
-    # parallelGenerateConcRingDataset(to_extract, configurations=numpy.array([[15, 4, 6]]), relative_radius=False)
-    # parallelGenerateConcRingDataset(None, configurations=numpy.array([[10, 8, 10]]), relative_radius=False)
-    # # #
-    # # #
+    # parallelGenerateConcRingDataset(to_extract, configurations=numpy.array([[0.1, 6, 8]]), relative_radius=False, normalized=True)
+
+    # generateSPDatasetFromConcRings("Datasets/ConcentricRings/SHREC17_R10_R6_P8_CSIRSv2Spiral", valid_rings=2)
+    generateSPDatasetFromConcRings("Datasets/ConcentricRings/SHREC17_R0.05_R6_P8_CSIRSv2Spiral", valid_rings=2, normalized=True)
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 5, 25, "level_3", 5, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS5_SPIDER25_CONN5_RES3")
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R0.1_R6_P8_CSIRSv2Spiral_SPECIALWEIGHT", 25, 50, "level_3", 5, None, "SHREC17_R0.1_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN5_RES3")
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R0.05_R6_P8_CSIRSv2Spiral", 25, 50, "level_3", 5, None, "SHREC17_R0.05_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN5_RES3")
+    generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R0.05_R6_P8_CSIRSv2Spiral", 5, 25, "level_3", 5, None, "SHREC17_R0.05_R6_P8_CSIRSv2Spiral_MGRAPHS5_SPIDER25_CONN5_RES3")
+
+    #
+    #
+    # parallelGenerateMeshDataset(None, True, "level_3")
+    # # generateMeshDataset("all", True, "level_3")
 
 
 if __name__ == "__main__":

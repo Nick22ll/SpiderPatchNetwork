@@ -26,21 +26,25 @@ class SpiderPatch(dgl.DGLGraph):
 
         start_nodes = np.empty(0, dtype=int)
         end_nodes = np.empty(0, dtype=int)
+        ring_indices = [-1]
+        point_indices = [-1]
         first_ring_nodes_id = np.empty(0, dtype=int)
         current_node = -1
-        node_distances = np.empty(0)
+        edge_weights = np.empty(0)
         for ring in range(concentricRings.getRingsNumber()):
             for elem in range(len(concentricRings[ring])):
                 # Generate the graph node (it is represented by edges)
                 if any(~np.isnan(concentricRings[ring, elem])):
                     current_node += 1
+                    ring_indices.append(ring)
+                    point_indices.append(elem)
                     next_elem_same_ring = concentricRings[ring][(elem + 1) % len(concentricRings[ring].points)]
                     if any(~np.isnan(next_elem_same_ring)) and ring == 0:  # if the next element in the ring is not NaN AND first ring
                         adjacent_node_id = (current_node + 1) % concentricRings[ring].getElementsNumber()
                         start_nodes = np.hstack((start_nodes, [current_node], [adjacent_node_id]))
                         end_nodes = np.hstack((end_nodes, [adjacent_node_id], [current_node]))
                         edge_weight = 1 * pow((1 - WEIGHT_DECAY), ring)
-                        node_distances = np.hstack((node_distances, np.tile(edge_weight, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(next_elem_same_ring - concentricRings[ring][elem]), 2)))
+                        edge_weights = np.hstack((edge_weights, np.tile(edge_weight, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(next_elem_same_ring - concentricRings[ring][elem]), 2)))
                         first_ring_nodes_id = np.hstack((first_ring_nodes_id, current_node))
                     else:
                         # Check if the next element in the ring is not NaN
@@ -53,7 +57,7 @@ class SpiderPatch(dgl.DGLGraph):
                             end_nodes = np.hstack((end_nodes, [adjacent_node_id], [current_node]))
                             # do all'edge peso pari a 0.75 essendo un edge di collegamento tra due nodi sullo stesso anello
                             edge_weight = 0.85 * pow((1 - WEIGHT_DECAY), ring)
-                            node_distances = np.hstack((node_distances, np.tile(edge_weight, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(next_elem_same_ring - concentricRings[ring][elem]), 2)))
+                            edge_weights = np.hstack((edge_weights, np.tile(edge_weight, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(next_elem_same_ring - concentricRings[ring][elem]), 2)))
 
                     if ring < concentricRings.getRingsNumber() - 1:  # If not last ring
                         if any(~np.isnan(concentricRings[(ring + 1)][elem])):  # Controllo che il nodo nella stessa posizione del nodo corrente ma nell'anello successivo sia NON nan
@@ -63,21 +67,22 @@ class SpiderPatch(dgl.DGLGraph):
                             end_nodes = np.hstack((end_nodes, [outer_node_id], [current_node]))
                             # do all'edge peso pari a 1 essendo un edge di collegamento tra due nodi su anelli diversi
                             edge_weight = 1 * pow((1 - WEIGHT_DECAY), ring)
-                            node_distances = np.hstack((node_distances, np.tile(edge_weight, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(concentricRings[(ring + 1)][elem] - concentricRings[ring][elem]), 2)))
+                            edge_weights = np.hstack((edge_weights, np.tile(edge_weight, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(concentricRings[(ring + 1)][elem] - concentricRings[ring][elem]), 2)))
 
         # Add the center of the patch
         start_nodes = start_nodes + 1
         end_nodes = end_nodes + 1
-        node_distances = np.hstack((node_distances, np.tile(1, len(first_ring_nodes_id) * 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(mesh.vertices[seed_point] - concentricRings[0][first_ring_nodes_id], axis=1), 2)))
+        edge_weights = np.hstack((edge_weights, np.tile(1, len(first_ring_nodes_id) * 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(mesh.vertices[seed_point] - concentricRings[0][first_ring_nodes_id], axis=1), 2)))
         first_ring_nodes_id = np.array(first_ring_nodes_id) + 1
         start_nodes = np.hstack((start_nodes, [0] * len(first_ring_nodes_id), first_ring_nodes_id))
         end_nodes = np.hstack((end_nodes, first_ring_nodes_id, [0] * len(first_ring_nodes_id)))
 
         # Calculate NODE features
         node_features = {}
-
+        node_features["rings"] = ring_indices
+        node_features["points"] = point_indices
         node_features["vertices"] = concentricRings.getNonNaNPoints()
-        node_features["weight"] = 1 - pairwise_distances(node_features["vertices"], self.seed_point.reshape((1, 3)), metric="euclidean", force_all_finite="allow-nan")
+        node_features["seed_distances"] = pairwise_distances(node_features["vertices"], self.seed_point.reshape((1, 3)), metric="euclidean", force_all_finite="allow-nan")
 
         mesh_face_idx = concentricRings.getNonNaNFacesIdx()
 
@@ -93,7 +98,13 @@ class SpiderPatch(dgl.DGLGraph):
 
         # Calculate EDGE features
         edge_features = {}
-        edge_features["node_distance"] = node_distances
+        edge_features["weights"] = edge_weights
+
+        # Calculates Node Weights
+        node_features["weights"] = np.empty((node_features["vertices"].shape[0]))
+        for vertex_id in range(node_features["vertices"].shape[0]):
+            edge_indices = np.where(vertex_id == end_nodes)[0]
+            node_features["weights"][vertex_id] = np.mean(edge_features["weights"][edge_indices])
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
@@ -105,10 +116,13 @@ class SpiderPatch(dgl.DGLGraph):
         for key, value in edge_features.items():
             self.edata[key] = torch.tensor(value, dtype=torch.float32)
 
+        # self.edata["weights"] = torch.ones(self.num_edges())
+        # self.ndata["weights"] = torch.ones(self.num_nodes())
+
     def draw(self):
         o3d.visualization.draw_geometries(self.to_draw())
 
-    def to_draw(self):
+    def to_draw(self, color=None):
         points = o3d.utility.Vector3dVector(self.ndata["vertices"])
         edges = self.edges()
         lines = o3d.utility.Vector2iVector([[edges[0][i], edges[1][i]] for i in range(len(edges[0]))])
@@ -119,6 +133,8 @@ class SpiderPatch(dgl.DGLGraph):
 
         point_cloud = o3d.geometry.PointCloud()
         point_cloud.points = points
+        if color is not None:
+            point_cloud.colors = o3d.utility.Vector3dVector(np.tile(color, (len(points), 1)))
 
         return [line_set, point_cloud]
 
@@ -241,3 +257,35 @@ class SpiderPatchLRF(dgl.DGLGraph):
 
     def getEdgeFeatsNames(self):
         return list(self.edata.keys())
+
+
+def SP_distanceV2(sp1, sp2, feat_name):
+    little, larger = sp2, sp1
+    little_data, larger_data = little.ndata[feat_name], larger.ndata[feat_name]
+    if sp1.ndata[feat_name].shape[0] != sp2.ndata[feat_name].shape[0]:
+        if sp1.ndata[feat_name].shape[0] < sp2.ndata[feat_name].shape[0]:
+            little, larger = sp1, sp2
+            little_data, larger_data = little.ndata[feat_name], larger.ndata[feat_name]
+
+        temp = torch.zeros((larger.ndata[feat_name].shape[0], larger.ndata[feat_name].shape[1]))
+        delay = 0
+        for idx in range(larger.ndata[feat_name].shape[0]):
+            if (little.ndata["rings"][idx - delay], little.ndata["points"][idx - delay]) == (larger.ndata["rings"][idx], larger.ndata["points"][idx]):
+                temp[idx] = little.ndata[feat_name][idx - delay]
+            else:
+                delay += 1
+        little_data = temp
+
+    differences = little_data - larger_data
+    norms = np.linalg.norm(differences, axis=1)
+    return sum(norms)
+
+
+def SP_distanceV1(sp1, sp2, feat_name):
+    return np.linalg.norm(dgl.mean_nodes(sp1, feat_name) - dgl.mean_nodes(sp2, feat_name))
+
+
+def SP_matrix_distanceV1(sp1, feat_name):
+    mean_nodes1 = dgl.mean_nodes(sp1, feat_name)
+    matrix = torch.cdist(mean_nodes1, mean_nodes1)
+    return matrix

@@ -24,7 +24,7 @@ class SpiralMeshGraphDatasetForNNTraining:
         return len(self.train_dataset) + len(self.validation_dataset) + len(self.test_dataset)
 
     def split_dataset(self, dataset, seed=22, to_train=None, to_test=None):
-        random.seed(seed)
+        rng = np.random.default_rng(22)
         data_train, label_train = [], []
         data_test, label_test = [], []
         data_validation, label_validation = [], []
@@ -36,9 +36,9 @@ class SpiralMeshGraphDatasetForNNTraining:
             to_train, to_test = [], []
             for label in unique_labels:
                 sample_idx = np.unique(np.array(dataset.sample_id)[np.where(dataset.labels == label)])
-                train = random.sample(list(sample_idx), int(len(sample_idx) * 0.80))
+                train = rng.choice(list(sample_idx), int(len(sample_idx) * 0.80), replace=False)
                 test = list(set(sample_idx) - set(train))
-                validation = random.sample(list(test), int(len(test) * 0.50))
+                validation = rng.choice(list(test), int(len(test) * 0.50), replace=False)
                 test = list(set(test) - set(validation))
                 to_train.extend(train)
                 to_test.extend(test)
@@ -47,14 +47,14 @@ class SpiralMeshGraphDatasetForNNTraining:
             for label in unique_labels:
                 sample_idx = np.unique(np.array(dataset.sample_id)[np.where(dataset.labels == label)])
                 sample_idx = list(set(sample_idx) - set(to_test))
-                train = random.sample(list(sample_idx), int(len(sample_idx) * 0.90))
+                train = rng.choice(list(sample_idx), int(len(sample_idx) * 0.90), replace=False)
                 to_train.extend(train)
         elif to_test is None:
             to_test = []
             for label in unique_labels:
                 sample_idx = np.unique(np.array(dataset.sample_id)[np.where(dataset.labels == label)])
                 sample_idx = list(set(sample_idx) - set(to_train))
-                test = random.sample(list(sample_idx), int(len(sample_idx) * 0.50))
+                test = rng.choice(list(sample_idx), int(len(sample_idx) * 0.50), replace=False)
                 to_train.extend(test)
 
         to_train = set(to_train)
@@ -78,7 +78,7 @@ class SpiralMeshGraphDatasetForNNTraining:
                 mesh_idx_validation.append(dataset.mesh_id[i])
 
         combined = list(zip(data_train, label_train, sample_idx_train))
-        random.shuffle(combined)
+        rng.shuffle(combined)
         data_train[:], label_train[:], sample_idx_train[:] = zip(*combined)
 
         self.train_dataset = SpiralMeshGraphDataset(dataset_name=self.name + "_train", graphs=data_train, labels=label_train, sample_id=sample_idx_train, mesh_id=mesh_idx_train)

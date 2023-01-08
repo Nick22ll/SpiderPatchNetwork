@@ -26,8 +26,8 @@ def threePlaneIntersection(n1, d1, n2, d2, n3=None, d3=0):
     d = np.array([d1, d2, d3])
     if detA == 0:
         #  Warning : No Three Plane Intersection
-        np.random.seed(2)
-        n3 = np.random.rand(3)
+        rng = np.random.default_rng(22)
+        n3 = rng.random(3)
         p = threePlaneIntersection(n1, d1, n2, d2, n3, d3)
     else:
         Ax = np.array(A)

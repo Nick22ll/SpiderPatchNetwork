@@ -194,7 +194,7 @@ class SpiralMeshGraphDataset(DGLDataset):
 
         print(f"Loading MeshGraph Dataset from: {configuration}")
         import re
-        random.seed(22)
+        rng = np.random.default_rng(22)
         self.graphs = []
         self.labels = []
         self.sample_id = []
@@ -212,7 +212,7 @@ class SpiralMeshGraphDataset(DGLDataset):
                         for _ in range(graph_for_mesh):
                             mesh_id = [int(s) for s in re.findall(r'\d+', concRings_filename)]
                             samples_id = list(range(len(concentricRings)))
-                            random.shuffle(samples_id)
+                            rng.shuffle(samples_id)
                             samples_number = 0
                             samples = []
                             for id in samples_id:
@@ -241,7 +241,7 @@ class SpiralMeshGraphDataset(DGLDataset):
                             for _ in range(graph_for_mesh):
                                 mesh_id = [int(s) for s in re.findall(r'\d+', concRings_filename)]
                                 samples_id = list(range(len(concentricRings)))
-                                random.shuffle(samples_id)
+                                rng.shuffle(samples_id)
                                 samples_number = 0
                                 samples = []
                                 for id in samples_id:

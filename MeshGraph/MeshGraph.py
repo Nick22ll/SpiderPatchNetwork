@@ -40,6 +40,8 @@ class MeshGraph(dgl.DGLGraph):
                 self.patches[-1].ndata.pop(name)
             seed_points = np.vstack((seed_points, patch.seed_point))
 
+        self.patches = np.array(self.patches)
+
         # Calculate the MeshGraphs edges
         if neighbours_number > 0:
             neighbour_points = neighbours_number + 1
@@ -54,7 +56,7 @@ class MeshGraph(dgl.DGLGraph):
                 tmp_edges.remove(i)
                 end_nodes = np.hstack((end_nodes, tmp_edges))
 
-        # Makes the ReadoutMeshGraph Bidirectional
+        # Makes the MeshGraph Bidirectional
         tmp = np.array(start_nodes)
         start_nodes = np.hstack((start_nodes, end_nodes))
         end_nodes = np.hstack((end_nodes, tmp))
@@ -74,7 +76,7 @@ class MeshGraph(dgl.DGLGraph):
         self.edata["weights"] = torch.tensor(weights, dtype=torch.float32)
 
     def getNodeFeatsNames(self):
-        return list(self.ndata.keys())
+        return np.array(self.ndata.keys(), dtype=object)
 
     def getEdgeFeatsNames(self):
         return list(self.edata.keys())
@@ -119,5 +121,5 @@ class MeshGraph(dgl.DGLGraph):
 
     def to(self, device, **kwargs):
 
-        self.patches = [self.patches[i].to(device) for i in range(len(self.patches))]
+        self.patches = np.array([self.patches[i].to(device) for i in range(len(self.patches))])
         return super().to(device, **kwargs)

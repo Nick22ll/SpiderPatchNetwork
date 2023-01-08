@@ -34,9 +34,9 @@ class RetrievalDataset(SpiderPatchDataset):
         if relative_radius:
             radius = radius * mesh.edge_length
         boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil(1.5 * radius)))
-        random.seed(222)
+        rng = np.random.default_rng(222)
         seed_point_sequence = [i for i in range(len(mesh.vertices))]
-        random.shuffle(seed_point_sequence)
+        rng.shuffle(seed_point_sequence)
         self.graphs = np.empty(0)
         self.seed_point_indices = np.empty(0)
         self.labels = np.empty(0)
@@ -56,15 +56,15 @@ class RetrievalDataset(SpiderPatchDataset):
         self.save_to(f"../Retrieval/Datasets")
 
     def getTrainTestMask(self, train_samples=200, percentage=False):
-        random.seed(22)
+        rng = np.random.default_rng(22)
         train_indices = []
         test_indices = []
         for label in np.unique(self.labels):
             label_indices = np.where(self.labels == label)[0]
             if percentage:
-                train_label_indices = np.random.choice(label_indices, int((train_samples / 100) * len(label_indices)), replace=False)
+                train_label_indices = rng.choice(label_indices, int((train_samples / 100) * len(label_indices)), replace=False)
             else:
-                train_label_indices = np.random.choice(label_indices, train_samples, replace=False)
+                train_label_indices = rng.choice(label_indices, train_samples, replace=False)
             test_indices.extend(list(np.delete(label_indices, np.argwhere(np.isin(label_indices, train_label_indices)))))
             train_indices.extend(list(train_label_indices))
         return train_indices, test_indices

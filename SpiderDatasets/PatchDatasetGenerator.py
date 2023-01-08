@@ -1,22 +1,17 @@
 import multiprocessing
 import os
 import pickle
-import random
-import re
 import warnings
+from math import floor
 
 import dgl
 import numpy as np
-
 from sklearn.metrics import pairwise_distances
 from tqdm import tqdm
 
-from Mesh import *
-from math import floor
-
+from CSIRS.CSIRS import CSIRSv2
 from Mesh.Mesh import Mesh
 from SHREC_Utils import subdivide_for_mesh
-from CSIRS.CSIRS import CSIRSv2
 from SpiderPatch.SpiderPatch import SpiderPatchLRF, SpiderPatch
 from SpiderPatch.SuperPatch import SuperPatch_preloaded
 
@@ -25,21 +20,25 @@ DATASETS = {
 }
 
 
-def generateSPDatasetFromConcRings(concRings_path, valid_rings=2):
+def generateSPDatasetFromConcRings(concRings_path, valid_rings=2, normalized=False):
     warnings.filterwarnings("ignore")
-    mesh_path = concRings_path.replace("ConcentricRings", "Meshes")
+    if normalized:
+        mesh_path = concRings_path.replace("ConcentricRings", "NormalizedMeshes")
+    else:
+        mesh_path = concRings_path.replace("ConcentricRings", "Meshes")
+
     mesh_path = mesh_path.replace(mesh_path[mesh_path.find("SHREC17"):], "SHREC17")
 
     for label in tqdm(os.listdir(concRings_path), position=0, leave=False, desc=f"Label: ", colour="white", ncols=80):
-        for id in tqdm(os.listdir(f"{concRings_path}/{label}"), position=0, leave=False, desc=f"ID: ", colour="white", ncols=80):
-            for resolution_level in tqdm(os.listdir(f"{concRings_path}/{label}/{id}"), position=0, leave=False, desc=f"Resolution Level: ", colour="white", ncols=80):
-                conc_filename = os.listdir(f"{concRings_path}/{label}/{id}/{resolution_level}")[0]
+        for mesh_id in tqdm(os.listdir(f"{concRings_path}/{label}"), position=0, leave=False, desc=f"ID: ", colour="white", ncols=80):
+            for resolution_level in tqdm(os.listdir(f"{concRings_path}/{label}/{mesh_id}"), position=0, leave=False, desc=f"Resolution Level: ", colour="white", ncols=80):
+                conc_filename = os.listdir(f"{concRings_path}/{label}/{mesh_id}/{resolution_level}")[0]
                 mesh_filename = conc_filename.replace("concRing", "mesh")
 
-                with open(f"{mesh_path}/{label}/{id}/{resolution_level}/{mesh_filename}", "rb") as mesh_file:
+                with open(f"{mesh_path}/{label}/{mesh_id}/{resolution_level}/{mesh_filename}", "rb") as mesh_file:
                     mesh = pickle.load(mesh_file)
 
-                with open(f"{concRings_path}/{label}/{id}/{resolution_level}/{conc_filename}", "rb") as file:
+                with open(f"{concRings_path}/{label}/{mesh_id}/{resolution_level}/{conc_filename}", "rb") as file:
                     conc_rings = pickle.load(file)
 
                 spider_patches = []
@@ -53,9 +52,9 @@ def generateSPDatasetFromConcRings(concRings_path, valid_rings=2):
                 save_path = concRings_path.replace('ConcentricRings', 'SpiderPatches')
                 os.makedirs(f"{save_path}", exist_ok=True)
                 os.makedirs(f"{save_path}/{label}", exist_ok=True)
-                os.makedirs(f"{save_path}/{label}/{id}", exist_ok=True)
-                os.makedirs(f"{save_path}/{label}/{id}/{resolution_level}", exist_ok=True)
-                with open(f"{save_path}/{label}/{id}/{resolution_level}/{conc_filename.replace('concRing', 'spiderPatches')}", 'wb') as file:
+                os.makedirs(f"{save_path}/{label}/{mesh_id}", exist_ok=True)
+                os.makedirs(f"{save_path}/{label}/{mesh_id}/{resolution_level}", exist_ok=True)
+                with open(f"{save_path}/{label}/{mesh_id}/{resolution_level}/{conc_filename.replace('concRing', 'spiderPatches')}", 'wb') as file:
                     pickle.dump(spider_patches, file, protocol=-1)
 
 
@@ -99,9 +98,9 @@ def parallelGenerateLRFPatchDataset(to_extract="all"):
             max_radius = np.max(configurations[:, 0]) / np.min(configurations[:, 1])
             boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil(1.5 * max_radius)))
             # Under development uses a fixed seed points sequence
-            random.seed(666)
-            seed_point_sequence = list(np.unique(random.sample(range(vertices_number - 1), 4000)))
-            random.shuffle(seed_point_sequence)
+            rng = np.random.default_rng(22)
+            seed_point_sequence = list(np.unique(rng.choice(range(vertices_number - 1), 4000, replace=False)))
+            rng.shuffle(seed_point_sequence)
             for config in configurations:
                 radius, rings, points = config
                 # Generate N number of patches for a single mesh
@@ -183,9 +182,9 @@ def generateSuperPatchDataset(to_extract="all"):
             boundary_vertices.append(np.where(np.any(distances < pow(max_radius, 2), axis=0))[0])
 
         # Under development uses a fixed seed points sequence
-        random.seed(666)
-        seed_point_sequence = list(np.unique(random.sample(range(vertices_number - 1), 4000)))
-        random.shuffle(seed_point_sequence)
+        rng = np.random.default_rng(22)
+        seed_point_sequence = list(rng.choice(range(vertices_number - 1), 4000, replacement=False))
+        rng.shuffle(seed_point_sequence)
         for config_id, config in enumerate(configurations):
             radius, rings, points = config
             # Generate N super patches for a single sample

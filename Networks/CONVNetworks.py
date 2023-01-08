@@ -4,392 +4,160 @@ import dgl
 import numpy as np
 import torch
 import torch.nn as nn
-from torch_geometric.nn import GraphNorm
 from dgl.dataloading import GraphDataLoader
-from dgl.nn.pytorch import GraphConv, EdgeWeightNorm, SortPooling
 
-from Networks.MLP import MLP, GenericMLP
+from Networks.CONVMeshGraphModules import GMEmbedder, GMEmbedder2ConvUR, JumpResGMEmbedder, JumpGMEmbedder
+from Networks.CONVSpiderPatchModules import SPEmbedder3Conv, WEIGHTSPEmbedder3Conv, READOUTWEIGHTSPEmbedder3Conv, SPEmbedder3ConvUNIVERSAL, JumpResSPEmbedder, WEIGHTSPEmbedderAR
 from Networks.SpiralReadout import SpiralReadout
 from Networks.UniversalReadout import UniversalReadout
 
 
-class PatchEmbedder2ConvLayer(nn.Module):
-    def __init__(self, in_feats, hidden_dim, embedding_dim, dropout):
-        super(PatchEmbedder2ConvLayer, self).__init__()
+class UNIVERSALCONVMeshNetwork(nn.Module):
+    def __init__(self, in_dim, node_numbers, out_feats, dropout):
+        super(UNIVERSALCONVMeshNetwork, self).__init__()
+
+        ####  Variables  ####
+        self.name = self.__class__.__name__
+        self.rng = np.random.default_rng(22)
 
         ####  Layers  ####
-        self.conv1 = GraphConv(in_feats, hidden_dim, bias=False)
-        self.conv2 = GraphConv(hidden_dim, int(hidden_dim / 4), bias=False)
-        self.embedder = nn.Linear(int(hidden_dim / 4) + hidden_dim + int(hidden_dim / 16) + int(hidden_dim / 4), embedding_dim, bias=False)
+        self.patch_embedder = WEIGHTSPEmbedderAR(in_channels=in_dim, layers_num=3, dropout=dropout, nodes_number=node_numbers)
+        self.mesh_embedder = JumpGMEmbedder(in_channels=self.patch_embedder.embed_dim, layers_num=3, dropout=dropout)
+        self.classifier = nn.Linear(in_features=self.mesh_embedder.embed_dim, out_features=out_feats, bias=False)
 
-        ####  Activation Functions  ####
-        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.01)
+    def forward(self, mesh_graph, patches, device):
+        readouts = torch.empty((0, self.patch_embedder.embed_dim), device=device)
+        random_sequence = self.rng.permutation(len(patches))
 
-        ####  Normalization Layers  ####
-        self.GraphNormConv1 = GraphNorm(hidden_dim, eps=1e-5)
-        self.GraphNormConv2 = GraphNorm(int(hidden_dim / 4), eps=1e-5)
-        self.LinNorm = nn.InstanceNorm1d(embedding_dim, eps=1e-05, momentum=0.1)
+        # noinspection PyTypeChecker
+        dataloader = GraphDataLoader(patches[random_sequence], batch_size=25, drop_last=False)
+        for spider_patch in dataloader:
+            readouts = torch.vstack((readouts, self.patch_embedder(spider_patch, spider_patch.ndata["aggregated_feats"])))
 
-        #### Readout Layer ####
-        self.readout1 = UniversalReadout(hidden_dim, hidden_dim * 2, int(hidden_dim / 4), dropout)
-        self.readout2 = UniversalReadout(int(hidden_dim / 4), int(hidden_dim / 2), int(hidden_dim / 16), dropout)
+        with mesh_graph.local_scope():
+            dgl.reorder_graph(mesh_graph, node_permute_algo='custom', permute_config={'nodes_perm': random_sequence})
+            mesh_embedding = self.mesh_embedder(mesh_graph, readouts)
 
-        ####  Weights Initialization  ####
-        torch.nn.init.kaiming_uniform_(self.conv1.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-        torch.nn.init.kaiming_uniform_(self.conv2.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-        torch.nn.init.xavier_uniform_(self.embedder.weight, gain=1.0)
-
-        ####  Dropout  ####
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, g, node_feats, edge_weights):
-        # TODO  Valutare inserimento di un altro readout sul grafo di base
-        # with g.local_scope():
-        #     g.ndata['updated_feats'] = node_feats
-        #     readout = self.readout1(g, 'updated_feats')
-        #     readout = torch.hstack((readout, dgl.mean_nodes(g, "updated_feats")))
-        #
-        updated_feats = self.conv1(g, node_feats, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv1(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
-
-        with g.local_scope():
-            g.ndata['updated_feats'] = updated_feats
-            readout = self.readout1(g, 'updated_feats')
-            readout = torch.hstack((readout, dgl.mean_nodes(g, "updated_feats")))
-
-        updated_feats = self.conv2(g, updated_feats, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv2(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
-
-        with g.local_scope():
-            g.ndata['updated_feats'] = updated_feats
-            readout = torch.hstack((readout, self.readout2(g, 'updated_feats')))
-            updated_feats = self.embedder(torch.hstack((readout, dgl.mean_nodes(g, "updated_feats"))))
-            updated_feats = self.LinNorm(updated_feats)
-            return self.LeakyReLU(updated_feats)
+            return self.classifier(mesh_embedding)
 
     def save(self, path):
-        torch.save(self.state_dict(), path)
+        os.makedirs(path, exist_ok=True)
+        torch.save(self.state_dict(), path + "/network.pt")
 
     def load(self, path):
         self.load_state_dict(torch.load(path))
         self.eval()
 
 
-class PatchEmbedder2ConvLayerAR(nn.Module):
-    def __init__(self, in_feats, hidden_dim, embedding_dim, dropout):
-        super(PatchEmbedder2ConvLayerAR, self).__init__()
+class READOUTWEIGHTCONVMeshNetwork(nn.Module):
+    def __init__(self, in_dim, hidden_dim, out_feats, dropout, nodes_number, edges_number):
+        super(READOUTWEIGHTCONVMeshNetwork, self).__init__()
+
+        ####  Variables  ####
+        self.name = self.__class__.__name__
+        self.rng = np.random.default_rng(22)
 
         ####  Layers  ####
-        self.conv1 = GraphConv(in_feats, hidden_dim, bias=False)
-        self.conv2 = GraphConv(hidden_dim, int(hidden_dim / 4), bias=False)
-        self.embedder = nn.Linear(in_feats + hidden_dim + int(hidden_dim / 4), embedding_dim, bias=False)
+        self.patch_embedder = READOUTWEIGHTSPEmbedder3Conv(in_feats=in_dim, hidden_dim=in_dim * 4, dropout=dropout, nodes_number=nodes_number, edges_number=edges_number)
+        self.mesh_embedder = GMEmbedder(in_dim=self.patch_embedder.embed_dim, hidden_dim=hidden_dim, dropout=dropout)
+        self.classifier = nn.Linear(in_features=self.mesh_embedder.embed_dim, out_features=out_feats, bias=False)
 
-        ####  Activation Functions  ####
-        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.01)
+    def forward(self, mesh_graph, patches, device):
+        readouts = torch.empty((0, self.patch_embedder.embed_dim), device=device)
+        random_sequence = self.rng.permutation(len(patches))
 
-        ####  Normalization Layers  ####
-        self.GraphNormConv1 = GraphNorm(hidden_dim, eps=1e-5)
-        self.GraphNormConv2 = GraphNorm(int(hidden_dim / 4), eps=1e-5)
-        self.LinNorm = nn.InstanceNorm1d(embedding_dim, eps=1e-05, momentum=0.1)
+        # noinspection PyTypeChecker
+        dataloader = GraphDataLoader(patches[random_sequence], batch_size=10, drop_last=False)
+        for spider_patch in dataloader:
+            readouts = torch.vstack((readouts, self.patch_embedder(spider_patch, spider_patch.ndata["aggregated_feats"])))
 
-        ####  Weights Initialization  ####
-        torch.nn.init.kaiming_uniform_(self.conv1.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-        torch.nn.init.kaiming_uniform_(self.conv2.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-        torch.nn.init.xavier_uniform_(self.embedder.weight, gain=1.0)
+        with mesh_graph.local_scope():
+            dgl.reorder_graph(mesh_graph, node_permute_algo='custom', permute_config={'nodes_perm': random_sequence})
+            mesh_embedding = self.mesh_embedder(mesh_graph, readouts, None)
 
-        ####  Dropout  ####
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, g, node_feats, edge_weights):
-        with g.local_scope():
-            g.ndata['updated_feats'] = node_feats
-            readout = dgl.mean_nodes(g, "updated_feats")
-
-        updated_feats = self.conv1(g, node_feats, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv1(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
-
-        with g.local_scope():
-            g.ndata['updated_feats'] = updated_feats
-            readout = torch.hstack((readout, dgl.mean_nodes(g, "updated_feats")))
-
-        updated_feats = self.conv2(g, updated_feats, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv2(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
-
-        with g.local_scope():
-            g.ndata['updated_feats'] = updated_feats
-            updated_feats = self.embedder(torch.hstack((readout, dgl.mean_nodes(g, "updated_feats"))))
-            updated_feats = self.LinNorm(updated_feats)
-            return self.LeakyReLU(updated_feats)
+            return self.classifier(mesh_embedding)
 
     def save(self, path):
-        torch.save(self.state_dict(), path)
+        os.makedirs(path, exist_ok=True)
+        torch.save(self.state_dict(), path + "/network.pt")
 
     def load(self, path):
         self.load_state_dict(torch.load(path))
         self.eval()
 
 
-class GMReader2ConvUniversalReadout(nn.Module):
-    def __init__(self, in_dim, hidden_dim, out_dim, dropout):
-        super(GMReader2ConvUniversalReadout, self).__init__()
+class WEIGHTCONVMeshNetwork(nn.Module):
+    def __init__(self, in_dim, hidden_dim, out_feats, dropout, nodes_number, edges_number):
+        super(WEIGHTCONVMeshNetwork, self).__init__()
+
+        ####  Variables  ####
+        self.name = self.__class__.__name__
+        self.rng = np.random.default_rng(22)
 
         ####  Layers  ####
-        self.conv1 = GraphConv(in_dim, hidden_dim, bias=False)
-        self.conv2 = GraphConv(hidden_dim, hidden_dim, bias=False)
-        # self.classifier = GenericMLP(int(hidden_dim / 4) * 2, hidden_dim, out_dim, dropout)
-        self.classifier = nn.Linear(int(hidden_dim / 4) * 2, out_dim, bias=False)
+        self.patch_embedder = WEIGHTSPEmbedder3Conv(in_feats=in_dim, hidden_dim=in_dim * 4, dropout=dropout, nodes_number=nodes_number, edges_number=edges_number)
+        self.mesh_embedder = GMEmbedder(in_dim=self.patch_embedder.embed_dim, hidden_dim=hidden_dim, dropout=dropout)
+        self.classifier = nn.Linear(in_features=self.mesh_embedder.embed_dim, out_features=out_feats, bias=False)
 
-        ####  Activation Functions  ####
-        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.01)
+    def forward(self, mesh_graph, patches, device):
+        readouts = torch.empty((0, self.patch_embedder.embed_dim), device=device)
+        random_sequence = self.rng.permutation(len(patches))
 
-        ####  Normalization Layers  ####
-        self.GraphNormConv1 = GraphNorm(hidden_dim, eps=1e-5)
-        self.GraphNormConv2 = GraphNorm(hidden_dim, eps=1e-5)
-
-        #### Readout Layer ####
-        self.readout1 = UniversalReadout(hidden_dim, hidden_dim * 2, int(hidden_dim / 4), dropout)
-        self.readout2 = UniversalReadout(hidden_dim, hidden_dim * 2, int(hidden_dim / 4), dropout)
-
-        ####  Weights Initialization  ####
-        torch.nn.init.kaiming_uniform_(self.conv1.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-        torch.nn.init.kaiming_uniform_(self.conv2.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-        torch.nn.init.xavier_uniform_(self.classifier.weight, gain=1.0)
-
-        ####  Dropout  ####
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, mesh_graph, features, edge_weights):
-        updated_feats = self.conv1(mesh_graph, features, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv1(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
+        # noinspection PyTypeChecker
+        dataloader = GraphDataLoader(patches[random_sequence], batch_size=10, drop_last=False)
+        for spider_patch in dataloader:
+            readouts = torch.vstack((readouts, self.patch_embedder(spider_patch, spider_patch.ndata["aggregated_feats"], spider_patch.edata["weights"])))
 
         with mesh_graph.local_scope():
-            mesh_graph.ndata["readout"] = updated_feats
-            readouts = self.readout1(mesh_graph, "readout")
+            dgl.reorder_graph(mesh_graph, node_permute_algo='custom', permute_config={'nodes_perm': random_sequence})
+            mesh_embedding = self.mesh_embedder(mesh_graph, readouts, None)
 
-        updated_feats = self.conv2(mesh_graph, updated_feats, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv2(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
-
-        with mesh_graph.local_scope():
-            mesh_graph.ndata["readout"] = updated_feats
-            readouts = torch.hstack((readouts, self.readout2(mesh_graph, "readout")))
-
-        return self.classifier(readouts)
+            return self.classifier(mesh_embedding)
 
     def save(self, path):
-        torch.save(self.state_dict(), path)
+        os.makedirs(path, exist_ok=True)
+        torch.save(self.state_dict(), path + "/network.pt")
 
     def load(self, path):
         self.load_state_dict(torch.load(path))
         self.eval()
 
 
-class GMReader2ConvAverageReadout(nn.Module):
-    def __init__(self, in_dim, hidden_dim, out_dim, dropout):
-        super(GMReader2ConvAverageReadout, self).__init__()
+class CONVMeshNetwork(nn.Module):
+    def __init__(self, in_dim, hidden_dim, out_feats, dropout, mesh_graph_edge_weights=True):
+        super(CONVMeshNetwork, self).__init__()
+
+        ####  Variables  ####
+        self.name = self.__class__.__name__
+        self.mesh_graph_edge_weights = mesh_graph_edge_weights
+        self.rng = np.random.default_rng(22)
 
         ####  Layers  ####
-        self.conv1 = GraphConv(in_dim, hidden_dim, bias=False)
-        self.conv2 = GraphConv(hidden_dim, hidden_dim, bias=False)
-        # self.classifier = GenericMLP(2 * hidden_dim, hidden_dim, out_dim, dropout)
-        self.classifier = nn.Linear(hidden_dim * 2, out_dim, bias=False)
+        self.patch_embedder = SPEmbedder3Conv(in_feats=in_dim, hidden_dim=in_dim * 4, dropout=dropout)
+        self.mesh_embedder = GMEmbedder(in_dim=self.patch_embedder.embed_dim, hidden_dim=hidden_dim, dropout=dropout)
+        self.classifier = nn.Linear(in_features=self.mesh_embedder.embed_dim, out_features=out_feats, bias=False)
 
-        ####  Activation Functions  ####
-        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.01)
+    def forward(self, mesh_graph, patches, device):
+        readouts = torch.empty((0, self.patch_embedder.embed_dim), device=device)
+        random_sequence = self.rng.permutation(len(patches))
 
-        ####  Normalization Layers  ####
-        self.GraphNormConv1 = GraphNorm(hidden_dim, eps=1e-5)
-        self.GraphNormConv2 = GraphNorm(hidden_dim, eps=1e-5)
-
-        ####  Weights Initialization  ####
-        torch.nn.init.kaiming_uniform_(self.conv1.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-        torch.nn.init.kaiming_uniform_(self.conv2.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-        torch.nn.init.xavier_uniform_(self.classifier.weight, gain=1.0)
-
-        ####  Dropout  ####
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, mesh_graph, features, edge_weights):
-        updated_feats = self.conv1(mesh_graph, features, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv1(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
+        # noinspection PyTypeChecker
+        dataloader = GraphDataLoader(patches[random_sequence], batch_size=10, drop_last=False)
+        for spider_patch in dataloader:
+            readouts = torch.vstack((readouts, self.patch_embedder(spider_patch, spider_patch.ndata["aggregated_feats"], spider_patch.edata["weights"])))
 
         with mesh_graph.local_scope():
-            mesh_graph.ndata["readout"] = updated_feats
-            readouts = dgl.mean_nodes(mesh_graph, "readout")
+            dgl.reorder_graph(mesh_graph, node_permute_algo='custom', permute_config={'nodes_perm': random_sequence})
+            if self.mesh_graph_edge_weights:
+                mesh_embedding = self.mesh_embedder(mesh_graph, readouts, mesh_graph.edata["weights"])
+            else:
+                mesh_embedding = self.mesh_embedder(mesh_graph, readouts, None)
 
-        updated_feats = self.conv2(mesh_graph, updated_feats, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv2(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
-
-        with mesh_graph.local_scope():
-            mesh_graph.ndata["readout"] = updated_feats
-            readouts = torch.hstack((readouts, dgl.mean_nodes(mesh_graph, "readout")))
-
-        return self.classifier(readouts)
+            return self.classifier(mesh_embedding)
 
     def save(self, path):
-        torch.save(self.state_dict(), path)
-
-    def load(self, path):
-        self.load_state_dict(torch.load(path))
-        self.eval()
-
-
-class GMEmbedder2ConvAverageReadout(nn.Module):
-    def __init__(self, in_dim, hidden_dim, dropout):
-        super(GMEmbedder2ConvAverageReadout, self).__init__()
-
-        ####  Layers  ####
-        self.conv1 = GraphConv(in_dim, hidden_dim, bias=False)
-        self.conv2 = GraphConv(hidden_dim, hidden_dim, bias=False)
-
-        ####  Activation Functions  ####
-        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.01)
-
-        ####  Normalization Layers  ####
-        self.GraphNormConv1 = GraphNorm(hidden_dim, eps=1e-5)
-        self.GraphNormConv2 = GraphNorm(hidden_dim, eps=1e-5)
-
-        ####  Weights Initialization  ####
-        torch.nn.init.kaiming_uniform_(self.conv1.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-        torch.nn.init.kaiming_uniform_(self.conv2.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-
-        ####  Dropout  ####
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, mesh_graph, features, edge_weights):
-        updated_feats = self.conv1(mesh_graph, features, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv1(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
-
-        with mesh_graph.local_scope():
-            mesh_graph.ndata["readout"] = updated_feats
-            readouts = dgl.mean_nodes(mesh_graph, "readout")
-
-        updated_feats = self.conv2(mesh_graph, updated_feats, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv2(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
-
-        with mesh_graph.local_scope():
-            mesh_graph.ndata["readout"] = updated_feats
-            readouts = torch.hstack((readouts, dgl.mean_nodes(mesh_graph, "readout")))
-
-        return self.LeakyReLU(readouts)
-
-    def save(self, path):
-        torch.save(self.state_dict(), path)
-
-    def load(self, path):
-        self.load_state_dict(torch.load(path))
-        self.eval()
-
-
-class GMEmbedder2ConvUniversalReadout(nn.Module):
-    def __init__(self, in_dim, hidden_dim, dropout):
-        super(GMEmbedder2ConvUniversalReadout, self).__init__()
-
-        self.embed_dim = int(hidden_dim / 4) * 2
-
-        ####  Layers  ####
-        self.conv1 = GraphConv(in_dim, hidden_dim, bias=False)
-        self.conv2 = GraphConv(hidden_dim, hidden_dim, bias=False)
-
-        ####  Activation Functions  ####
-        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.01)
-
-        ####  Normalization Layers  ####
-        self.GraphNormConv1 = GraphNorm(hidden_dim, eps=1e-5)
-        self.GraphNormConv2 = GraphNorm(hidden_dim, eps=1e-5)
-
-        #### Readout Layer ####
-        self.readout1 = UniversalReadout(hidden_dim, hidden_dim * 2, int(hidden_dim / 4), dropout)
-        self.readout2 = UniversalReadout(hidden_dim, hidden_dim * 2, int(hidden_dim / 4), dropout)
-
-        ####  Weights Initialization  ####
-        torch.nn.init.kaiming_uniform_(self.conv1.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-        torch.nn.init.kaiming_uniform_(self.conv2.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-
-        ####  Dropout  ####
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, mesh_graph, features, edge_weights):
-        updated_feats = self.conv1(mesh_graph, features, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv1(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
-
-        with mesh_graph.local_scope():
-            mesh_graph.ndata["readout"] = updated_feats
-            readouts = self.readout1(mesh_graph, "readout")
-
-        updated_feats = self.conv2(mesh_graph, updated_feats, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv2(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
-
-        with mesh_graph.local_scope():
-            mesh_graph.ndata["readout"] = updated_feats
-            readouts = torch.hstack((readouts, self.readout2(mesh_graph, "readout")))
-
-        return self.LeakyReLU(readouts)
-
-    def save(self, path):
-        torch.save(self.state_dict(), path)
-
-    def load(self, path):
-        self.load_state_dict(torch.load(path))
-        self.eval()
-
-
-class GMReader2ConvSortPoolReadout(nn.Module):
-    def __init__(self, in_dim, hidden_dim, out_dim, pool_dim, dropout):
-        super(GMReader2ConvSortPoolReadout, self).__init__()
-
-        ####  Layers  ####
-        self.conv1 = GraphConv(in_dim, hidden_dim, bias=False)
-        self.conv2 = GraphConv(hidden_dim, int(hidden_dim / 4), bias=False)
-        # self.classifier = GenericMLP(pool_dim * int(hidden_dim / 4) + (pool_dim * hidden_dim), pool_dim * int(hidden_dim / 4), out_dim, dropout)
-        self.classifier = nn.Linear(pool_dim * int(hidden_dim / 4) + (pool_dim * hidden_dim), out_dim, bias=False)
-
-        ####  Activation Functions  ####
-        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.01)
-
-        ####  Normalization Layers  ####
-        self.GraphNormConv1 = GraphNorm(hidden_dim, eps=1e-5)
-        self.GraphNormConv2 = GraphNorm(int(hidden_dim / 4), eps=1e-5)
-
-        #### Readout Layer ####
-        self.readout = SortPooling(k=pool_dim)
-
-        ####  Weights Initialization  ####
-        torch.nn.init.kaiming_uniform_(self.conv1.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-        torch.nn.init.kaiming_uniform_(self.conv2.weight, a=self.LeakyReLU.negative_slope, mode='fan_in', nonlinearity='leaky_relu')
-        torch.nn.init.xavier_uniform_(self.classifier.weight, gain=1.0)
-
-        ####  Dropout  ####
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, mesh_graph, features, edge_weights):
-        updated_feats = self.conv1(mesh_graph, features, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv1(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
-
-        readouts = self.readout(mesh_graph, updated_feats)
-
-        updated_feats = self.conv2(mesh_graph, updated_feats, edge_weight=edge_weights)
-        updated_feats = self.GraphNormConv2(updated_feats)
-        updated_feats = self.LeakyReLU(updated_feats)
-
-        readouts = torch.hstack((readouts, self.readout(mesh_graph, updated_feats)))
-
-        return self.classifier(readouts)
-
-    def save(self, path):
-        torch.save(self.state_dict(), path)
+        os.makedirs(path, exist_ok=True)
+        torch.save(self.state_dict(), path + "/network.pt")
 
     def load(self, path):
         self.load_state_dict(torch.load(path))
@@ -401,7 +169,7 @@ class MeshNetworkARAR(nn.Module):
         super(MeshNetworkARAR, self).__init__()
 
         ####  Variables  ####
-        self.name = "CONVMeshNetworkARAR"
+        self.name = self.__class__.__name__
         self.mesh_graph_edge_weights = mesh_graph_edge_weights
 
         ####  Layers  ####
@@ -433,13 +201,13 @@ class MeshNetworkPEARAR(nn.Module):
         super(MeshNetworkPEARAR, self).__init__()
 
         ####  Variables  ####
-        self.name = "CONVMeshNetworkPEARAR"
+        self.name = self.__class__.__name__
         self.readout_dim = readout_dim
         self.mesh_graph_edge_weights = mesh_graph_edge_weights
 
         ####  Layers  ####
-        self.patch_embedder = PatchEmbedder2ConvLayerAR(in_dim, in_dim * 4, readout_dim, dropout)
-        self.mesh_reader = GMReader2ConvAverageReadout(in_dim=readout_dim, hidden_dim=hidden_dim, out_dim=out_feats, dropout=dropout)
+        self.patch_embedder = PatchEmbedder2ConvLayerAR(in_dim, in_dim * 4, dropout)
+        self.mesh_reader = GMReader2ConvAverageReadout(in_dim=self.patch_embedder.embed_dim, hidden_dim=hidden_dim, out_dim=out_feats, dropout=dropout)
 
     def forward(self, mesh_graph, patches, device):
         readouts = torch.empty((0, self.readout_dim), device=device)
@@ -467,13 +235,16 @@ class MeshNetworkPEARUR(nn.Module):
         super(MeshNetworkPEARUR, self).__init__()
 
         ####  Variables  ####
-        self.name = "CONVMeshNetworkPEARUR"
+        self.name = self.__class__.__name__
         self.readout_dim = readout_dim
         self.mesh_graph_edge_weights = mesh_graph_edge_weights
 
         ####  Layers  ####
-        self.patch_embedder = PatchEmbedder2ConvLayer(in_dim, in_dim * 4, readout_dim, dropout)
-        self.mesh_reader = GMReader2ConvUniversalReadout(in_dim=readout_dim, hidden_dim=hidden_dim, out_dim=out_feats, dropout=dropout)
+        self.patch_embedder = PatchEmbedder2ConvLayer(in_dim, in_dim * 4, dropout)
+        self.mesh_embedder = GMEmbedder2ConvUR(in_dim=self.patch_embedder.embed_dim, hidden_dim=hidden_dim, dropout=dropout)
+        self.classifier = nn.Linear(self.mesh_embedder.embed_dim, out_feats, bias=False)
+
+        torch.nn.init.xavier_uniform_(self.classifier.weight, gain=1.0)
 
     def forward(self, mesh_graph, patches, device):
         readouts = torch.empty((0, self.readout_dim), device=device)
@@ -483,9 +254,11 @@ class MeshNetworkPEARUR(nn.Module):
             readouts = torch.vstack((readouts, self.patch_embedder(spider_patch, spider_patch.ndata["aggregated_feats"], spider_patch.edata["weights"])))
 
         if self.mesh_graph_edge_weights:
-            return self.mesh_reader(mesh_graph, readouts, mesh_graph.edata["weights"])
+            mesh_embedding = self.mesh_embedder(mesh_graph, readouts, mesh_graph.edata["weights"])
         else:
-            return self.mesh_reader(mesh_graph, readouts, None)
+            mesh_embedding = self.mesh_embedder(mesh_graph, readouts, None)
+
+        return self.classifier(mesh_embedding)
 
     def save(self, path):
         os.makedirs(path, exist_ok=True)
@@ -501,7 +274,7 @@ class MeshNetworkPEUR(nn.Module):
         super(MeshNetworkPEUR, self).__init__()
 
         ####  Variables  ####
-        self.name = "CONVMeshNetworkPEUR"
+        self.name = self.__class__.__name__
         self.readout_dim = readout_dim
         self.mesh_graph_edge_weights = mesh_graph_edge_weights
 
@@ -535,7 +308,7 @@ class MeshNetworkURUR(nn.Module):
         super(MeshNetworkURUR, self).__init__()
 
         ####  Variables  ####
-        self.name = "CONVMeshNetworkURUR"
+        self.name = self.__class__.__name__
         self.readout_dim = readout_dim
         self.mesh_graph_edge_weights = mesh_graph_edge_weights
 
@@ -569,7 +342,7 @@ class MeshNetworkSRUR(nn.Module):
         super(MeshNetworkSRUR, self).__init__()
 
         ####  Variables  ####
-        self.name = "CONVMeshNetworkSRUR"
+        self.name = self.__class__.__name__
         self.readout_dim = readout_dim
         self.mesh_graph_edge_weights = mesh_graph_edge_weights
 
@@ -609,7 +382,7 @@ class MeshNetworkSRAR(nn.Module):
         super(MeshNetworkSRAR, self).__init__()
 
         ####  Variables  ####
-        self.name = "CONVMeshNetworkSRAR"
+        self.name = self.__class__.__name__
         self.readout_dim = readout_dim
         self.mesh_graph_edge_weights = mesh_graph_edge_weights
 
@@ -642,7 +415,7 @@ class MeshNetworkSRPR(nn.Module):
         super(MeshNetworkSRPR, self).__init__()
 
         ####  Variables  ####
-        self.name = "CONVMeshNetworkSRPR"
+        self.name = self.__class__.__name__
         self.readout_dim = readout_dim
         self.mesh_graph_edge_weights = mesh_graph_edge_weights
 
@@ -660,85 +433,6 @@ class MeshNetworkSRPR(nn.Module):
             return self.mesh_reader(mesh_graph, readouts, mesh_graph.edata["weights"])
         else:
             return self.mesh_reader(mesh_graph, readouts, None)
-
-    def save(self, path):
-        os.makedirs(path, exist_ok=True)
-        torch.save(self.state_dict(), path + "/network.pt")
-
-    def load(self, path):
-        self.load_state_dict(torch.load(path))
-        self.eval()
-
-
-class AverageMeshNetworkPEARAR(nn.Module):
-    def __init__(self, in_dim, readout_dim, hidden_dim, block_dim, out_feats, dropout, mesh_graph_edge_weights=True):
-        super(AverageMeshNetworkPEARAR, self).__init__()
-
-        ####  Variables  ####
-        self.name = "AverageCONVMeshNetworkPEARAR"
-        self.readout_dim = readout_dim
-        self.block_readout_dim = hidden_dim * 2
-        self.mesh_graph_edge_weights = mesh_graph_edge_weights
-
-        ####  Layers  ####
-        self.patch_embedder = PatchEmbedder2ConvLayerAR(in_dim, in_dim * 4, readout_dim, dropout)
-        self.mesh_reader = GMEmbedder2ConvAverageReadout(in_dim=readout_dim, hidden_dim=hidden_dim, dropout=dropout)
-        self.classifier = nn.Linear(in_features=self.block_readout_dim * block_dim, out_features=out_feats, bias=False)
-
-    def forward(self, mesh_graphs, patches_list, device):
-        block_readout = torch.empty(0, device=device)
-        mesh_graph_dataloader = GraphDataLoader(mesh_graphs, batch_size=1, drop_last=False)
-        for sampler, mesh_graph in enumerate(mesh_graph_dataloader):
-            readouts = torch.empty((0, self.readout_dim), device=device)
-            # noinspection PyTypeChecker
-            dataloader = GraphDataLoader(np.random.permutation(patches_list[sampler]), batch_size=10, drop_last=False)
-            for spider_patch in dataloader:
-                readouts = torch.vstack((readouts, self.patch_embedder(spider_patch, spider_patch.ndata["aggregated_feats"], spider_patch.edata["weights"])))
-
-            if self.mesh_graph_edge_weights:
-                block_readout = torch.hstack((block_readout, self.mesh_reader(mesh_graph, readouts, mesh_graph.edata["weights"])))
-            else:
-                block_readout = torch.hstack((block_readout, self.mesh_reader(mesh_graph, readouts, None)))
-        return self.classifier(block_readout)
-
-    def save(self, path):
-        os.makedirs(path, exist_ok=True)
-        torch.save(self.state_dict(), path + "/network.pt")
-
-    def load(self, path):
-        self.load_state_dict(torch.load(path))
-        self.eval()
-
-
-class AverageMeshNetworkPEARUR(nn.Module):
-    def __init__(self, in_dim, readout_dim, hidden_dim, block_dim, out_feats, dropout, mesh_graph_edge_weights=True):
-        super(AverageMeshNetworkPEARUR, self).__init__()
-
-        ####  Variables  ####
-        self.name = "AverageCONVMeshNetworkPEARUR"
-        self.readout_dim = readout_dim
-        self.mesh_graph_edge_weights = mesh_graph_edge_weights
-
-        ####  Layers  ####
-        self.patch_embedder = PatchEmbedder2ConvLayerAR(in_dim, in_dim * 2, readout_dim, dropout)
-        self.mesh_reader = GMEmbedder2ConvUniversalReadout(in_dim=readout_dim, hidden_dim=hidden_dim, dropout=dropout)
-        self.classifier = nn.Linear(in_features=self.mesh_reader.embed_dim * block_dim, out_features=out_feats, bias=False)
-
-    def forward(self, mesh_graphs, patches_list, device):
-        block_readout = torch.empty(0, device=device)
-        mesh_graph_dataloader = GraphDataLoader(mesh_graphs, batch_size=1, drop_last=False)
-        for sampler, mesh_graph in enumerate(mesh_graph_dataloader):
-            readouts = torch.empty((0, self.readout_dim), device=device)
-            # noinspection PyTypeChecker
-            dataloader = GraphDataLoader(np.random.permutation(patches_list[sampler]), batch_size=10, drop_last=False)
-            for spider_patch in dataloader:
-                readouts = torch.vstack((readouts, self.patch_embedder(spider_patch, spider_patch.ndata["aggregated_feats"], spider_patch.edata["weights"])))
-
-            if self.mesh_graph_edge_weights:
-                block_readout = torch.hstack((block_readout, self.mesh_reader(mesh_graph, readouts, mesh_graph.edata["weights"])))
-            else:
-                block_readout = torch.hstack((block_readout, self.mesh_reader(mesh_graph, readouts, None)))
-        return self.classifier(block_readout)
 
     def save(self, path):
         os.makedirs(path, exist_ok=True)

@@ -1,3 +1,4 @@
+import copy
 import pickle
 
 import open3d as o3d
@@ -149,13 +150,16 @@ class Mesh:
             boundary_vertices = np.unique(np.hstack((boundary_vertices, self.verticesNeighbours(boundary_vertices))))
         return boundary_vertices
 
-    def draw(self):
+    def draw(self, return_to_draw=False):
         vertices = o3d.utility.Vector3dVector(self.vertices)
         faces = o3d.utility.Vector3iVector(self.faces)
         mesh = o3d.geometry.TriangleMesh(vertices, faces)
         mesh.compute_triangle_normals()
         mesh.compute_vertex_normals()
-        o3d.visualization.draw_geometries([mesh], mesh_show_back_face=True)
+        if return_to_draw:
+            return mesh
+        else:
+            o3d.visualization.draw_geometries([mesh], mesh_show_back_face=True)
 
     def drawWithConcRings(self, concRing, lrf=False):
         vertices = o3d.utility.Vector3dVector(self.vertices)
@@ -260,24 +264,40 @@ class Mesh:
         for_draw.append(cloud)
         o3d.visualization.draw_geometries(for_draw, mesh_show_back_face=True)
 
-    def drawWithMesh(self, external_mesh):
+    def drawWithMeshes(self, meshes, translate=False):
+        columns = 5
+        to_print = []
         vertices = o3d.utility.Vector3dVector(self.vertices)
         faces = o3d.utility.Vector3iVector(self.faces)
         mesh = o3d.geometry.TriangleMesh(vertices, faces)
         mesh.compute_triangle_normals()
         mesh.compute_vertex_normals()
-        external_mesh.mesh.paint_uniform_color([1, 0.706, 0])
-        o3d.visualization.draw_geometries([mesh, external_mesh.mesh], mesh_show_back_face=True)
+        to_print.append(copy.deepcopy(mesh))
+        for i, mesh in enumerate(meshes):
+            vertices = o3d.utility.Vector3dVector(mesh.vertices)
+            faces = o3d.utility.Vector3iVector(mesh.faces)
+            o3dmesh = o3d.geometry.TriangleMesh(vertices, faces)
+            o3dmesh.compute_triangle_normals()
+            o3dmesh.compute_vertex_normals()
+            if translate:
+                mesh.computeOrientedBoundingBox()
+                o3dmesh = o3dmesh.translate((mesh.oriented_bounding_box["extent"][0] * ((i + 1) % columns), mesh.oriented_bounding_box["extent"][1] * ((i + 1) % 3), 0))
+            to_print.append(copy.deepcopy(o3dmesh))
+        mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1)
+        mesh_frame.compute_triangle_normals()
+        mesh_frame.compute_vertex_normals()
+        to_print.append(copy.deepcopy(mesh_frame))
+        o3d.visualization.draw_geometries(to_print, mesh_show_back_face=True)
 
-    def drawWithSpiderPatches(self, patches):
+    def drawWithSpiderPatches(self, patches, colors=[]):
         vertices = o3d.utility.Vector3dVector(self.vertices)
         faces = o3d.utility.Vector3iVector(self.faces)
         mesh = o3d.geometry.TriangleMesh(vertices, faces)
         mesh.compute_triangle_normals()
         mesh.compute_vertex_normals()
         for_draw_patches = []
-        for patch in patches:
-            for_draw_patches.extend(patch.to_draw())
+        for idx, patch in enumerate(patches):
+            for_draw_patches.extend(patch.to_draw(colors[idx] if len(colors) > 0 else None))
         o3d.visualization.draw_geometries([mesh] + for_draw_patches, mesh_show_back_face=True)
 
     def drawWithMeshGraph(self, mesh_graph):
@@ -290,6 +310,27 @@ class Mesh:
         for patch in mesh_graph.patches:
             for_draw_patches.extend(patch.to_draw())
         o3d.visualization.draw_geometries([mesh] + for_draw_patches, mesh_show_back_face=True)
+
+    def drawWithMeshGraphs(self, mesh_graphs, return_to_draw=False):
+        vertices = o3d.utility.Vector3dVector(self.vertices)
+        faces = o3d.utility.Vector3iVector(self.faces)
+        mesh = o3d.geometry.TriangleMesh(vertices, faces)
+        mesh.compute_triangle_normals()
+        mesh.compute_vertex_normals()
+        self.computeOrientedBoundingBox()
+        meshes = [mesh]
+        for i in range(1, len(mesh_graphs)):
+            meshes.append(copy.deepcopy(mesh).translate((self.oriented_bounding_box["extent"][0] * i, 0, 0)))
+        for_draw_patches = []
+        for i, mesh_graph in enumerate(mesh_graphs):
+            for patch in mesh_graph.patches:
+                for_draw_patches.extend(patch.to_draw())
+                for_draw_patches[-2].translate((self.oriented_bounding_box["extent"][0] * i, 0, 0))
+                for_draw_patches[-1].translate((self.oriented_bounding_box["extent"][0] * i, 0, 0))
+        if return_to_draw:
+            return meshes + for_draw_patches
+        else:
+            o3d.visualization.draw_geometries(meshes + for_draw_patches, mesh_show_back_face=True)
 
     def drawWithLD(self, radius):
         vertices = o3d.utility.Vector3dVector(self.vertices)
@@ -362,13 +403,22 @@ class Mesh:
         mesh.vertex_colors = o3d.utility.Vector3dVector(rgbs)
         o3d.visualization.draw_geometries([mesh], mesh_show_back_face=True)
 
-    def loadFromMeshFile(self, mesh_path):
+    def loadFromMeshFile(self, mesh_path, normalize=False):
         """
         Load a mesh. Format available: .inp), ANSYS msh (.msh), AVS-UCD (.avs), CGNS (.cgns), DOLFIN XML (.xml), Exodus (.e, .exo), FLAC3D (.f3grid), H5M (.h5m), Kratos/MDPA (.mdpa), Medit (.mesh, .meshb), MED/Salome (.med), Nastran (bulk data, .bdf, .fem, .nas), Netgen (.vol, .vol.gz), Neuroglancer precomputed format, Gmsh (format versions 2.2, 4.0, and 4.1, .msh), OBJ (.obj), OFF (.off), PERMAS (.post, .post.gz, .dato, .dato.gz), PLY (.ply), STL (.stl), Tecplot .dat, TetGen .node/.ele, SVG (2D output only) (.svg), SU2 (.su2), UGRID (.ugrid), VTK (.vtk), VTU (.vtu), WKT (TIN) (.wkt), XDMF (.xdmf, .xmf).
         @param mesh_path: the path of the mesh to load
         @return: None
         """
         mesh = o3d.io.read_triangle_mesh(mesh_path)
+        if normalize:
+            pc = np.asarray(mesh.vertices)
+            centroid = np.mean(pc, axis=0)
+            pc = pc - centroid
+            m = np.max(np.sqrt(np.sum(pc ** 2, axis=1)))
+            pc /= m
+            pc = o3d.utility.Vector3dVector(pc)
+            faces = o3d.utility.Vector3iVector(mesh.triangles)
+            mesh = o3d.geometry.TriangleMesh(pc, faces)
         self.computeDataStructures(mesh)
 
     def save(self, path):

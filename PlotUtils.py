@@ -10,6 +10,7 @@ import torch
 from dgl.dataloading import GraphDataLoader
 from matplotlib.lines import Line2D
 from sklearn.manifold import TSNE
+from tqdm import tqdm
 
 
 def plot_confusion_matrix(cm, target_names=None, cmap=None):
@@ -64,7 +65,7 @@ def save_confusion_matrix(cm, path, filename, target_names=None, cmap=None):
     plt.clf()
 
 
-def plot_grad_flow(named_parameters):
+def plot_grad_flow(named_parameters, verbose=1, legend=False):
     """Plots the gradients flowing through different layers in the net during training.
     Can be used for checking for possible gradient vanishing / exploding problems.
 
@@ -74,14 +75,17 @@ def plot_grad_flow(named_parameters):
     max_grads = []
     layers = []
     for n, p in named_parameters:
-        if p.requires_grad and ("bias" not in n):
-            layers.append(n)
-            ave_grads.append(p.grad.abs().mean().cpu().detach().numpy())
-            max_grads.append(p.grad.abs().max().cpu().detach().numpy())
-            if ave_grads[-1] == 0 or max_grads[-1] == 0:
-                print(n)
-    plt.bar(np.arange(len(max_grads)), max_grads, alpha=0.1, lw=1, color="c")
-    plt.bar(np.arange(len(max_grads)), ave_grads, alpha=0.1, lw=1, color="b")
+        if p.grad is None:
+            print(f"Parameter {n} is none!")
+        else:
+            if p.requires_grad and ("bias" not in n):
+                layers.append(n)
+                ave_grads.append(p.grad.abs().mean().cpu().detach().numpy())
+                max_grads.append(p.grad.abs().max().cpu().detach().numpy())
+                if ave_grads[-1] == 0 or max_grads[-1] == 0 and verbose > 0:
+                    print(f"Paameter {n} is 0!")
+    plt.bar(np.arange(len(max_grads)), max_grads, alpha=0.4, lw=1, color="darkorange")
+    plt.bar(np.arange(len(max_grads)), ave_grads, alpha=0.5, lw=1, color="lime")
     plt.hlines(0, 0, len(ave_grads) + 1, lw=2, color="k")
     layers = [layers[i].replace(".weight", "") for i in range(len(layers))]
     plt.xticks(range(0, len(ave_grads), 1), layers, rotation=90)
@@ -91,11 +95,13 @@ def plot_grad_flow(named_parameters):
     plt.ylabel("average gradient")
     plt.title("Gradient flow")
     plt.grid(True)
-    plt.legend([Line2D([0], [0], color="c", lw=4),
-                Line2D([0], [0], color="b", lw=4),
-                Line2D([0], [0], color="k", lw=4)], ['max-gradient', 'mean-gradient', 'zero-gradient'])
+    if legend:
+        plt.legend([Line2D([0], [0], color="deepskyblue", lw=4),
+                    Line2D([0], [0], color="steelblue", lw=4),
+                    Line2D([0], [0], color="k", lw=4)], ['max-gradient', 'mean-gradient', 'zero-gradient'])
     plt.tight_layout()
     plt.show()
+    plt.close()
 
 
 def plot_training_statistics(path, filename, epochs, losses, val_accuracies, val_epochs, val_losses=None, title="Training Statistics"):
@@ -251,3 +257,29 @@ def print_weights_difference(model, precedent_weights):
 
     for i, name in enumerate(names):
         print(f"Layer: {name}   {old_parameters[i] - current_parameters[i]}")
+
+
+def plot_data_distributions(dataset, mask, feature_names=None):
+    if feature_names is None:
+        feature_names = ["aggregated_feats"]
+
+    to_plot = {}
+    for feature in feature_names:
+        tmp = []
+        for idx, mesh_graph in tqdm(enumerate(dataset.graphs[mask])):
+            for spider_patch in mesh_graph.patches:
+                list1 = spider_patch.ndata[feature].tolist()
+                tmp.extend(list1)
+        to_plot[feature] = np.array(tmp)
+
+    for feature in feature_names:
+        for col in range(to_plot[feature].shape[1]):
+            print(f"feature {feature}[{col}] - > {min(to_plot[feature][:, col])}", max(to_plot[feature][:, col]))
+
+    for feature in feature_names:
+        fig, axes = plt.subplots(nrows=1, ncols=to_plot[feature].shape[1], sharex=False, sharey=False)
+        for ax, col in zip(axes, range(to_plot[feature].shape[1])):
+            sns.kdeplot(data=to_plot[feature][:, col], ax=ax)
+            ax.set(title=f'Distribution of Feature: {feature}', xlabel=None)
+        fig.tight_layout()
+        plt.show()

@@ -16,7 +16,7 @@ DATASETS = {
 }
 
 
-def generateConcRingDataset(to_extract="all", configurations=None, CSIRS_type=CSIRSv2Spiral, relative_radius=False):
+def generateConcRingDataset(to_extract="all", configurations=None, CSIRS_type=CSIRSv2Spiral, relative_radius=False, normalized=False):
     """
 
     @param CSIRS_type:
@@ -31,7 +31,10 @@ def generateConcRingDataset(to_extract="all", configurations=None, CSIRS_type=CS
     conc_ring_per_mesh = 500
 
     meshes = subdivide_for_mesh(return_type="list")
-    load_path = f"Datasets/Meshes/SHREC17"
+    if normalized:
+        load_path = f"Datasets/NormalizedMeshes/SHREC17"
+    else:
+        load_path = f"Datasets/Meshes/SHREC17"
     save_path = f"Datasets/ConcentricRings/SHREC17"
 
     # Iterate over meshes of the mesh dataset
@@ -58,11 +61,13 @@ def generateConcRingDataset(to_extract="all", configurations=None, CSIRS_type=CS
 
                 vertices_number = len(mesh.vertices)
                 # Under development uses a fixed seed points sequence
-                random.seed(666)
-                seed_point_sequence = list(np.unique(random.sample(range(vertices_number - 1), min(conc_ring_per_mesh * 2, int(vertices_number * 0.80)))))
-                random.shuffle(seed_point_sequence)
+                rng = np.random.default_rng(666)
+                seed_point_sequence = list(rng.choice(range(vertices_number - 1), min(conc_ring_per_mesh * 2, int(vertices_number * 0.80)), replace=False))
+                rng.shuffle(seed_point_sequence)
                 for config in configurations:
                     radius, rings, points = config
+                    rings = int(rings)
+                    points = int(points)
                     if relative_radius:
                         radius = radius * mesh.edge_length
                     boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil((1.2 * radius) / mesh.edge_length)))
@@ -72,7 +77,6 @@ def generateConcRingDataset(to_extract="all", configurations=None, CSIRS_type=CS
                     for seed_point in seed_point_sequence:
                         if processed_conc_rings % (conc_ring_per_mesh + 1) == 0:
                             break
-
                         if seed_point in boundary_vertices:
                             continue
                         concentric_rings = CSIRS_type(mesh, seed_point, radius, rings, points)
@@ -99,12 +103,12 @@ def generateConcRingDataset(to_extract="all", configurations=None, CSIRS_type=CS
                             pickle.dump(concentric_rings_list, file, protocol=-1)
 
 
-def parallelGenerateConcRingDataset(to_extract=None, configurations=None, relative_radius=False):
+def parallelGenerateConcRingDataset(to_extract=None, configurations=None, relative_radius=False, normalized=False):
     if to_extract is None:
         to_extract = subdivide_for_mesh(return_type="list")
-    thread_num = 13
+    thread_num = 10
     mesh_for_thread = int(len(to_extract) / thread_num)
     pool = multiprocessing.Pool(processes=thread_num)
-    pool.starmap(generateConcRingDataset, [(to_extract[i * mesh_for_thread: (i * mesh_for_thread) + mesh_for_thread], configurations, CSIRSv2Spiral, relative_radius) for i in range(thread_num)])
+    pool.starmap(generateConcRingDataset, [(to_extract[i * mesh_for_thread: (i * mesh_for_thread) + mesh_for_thread], configurations, CSIRSv2Spiral, relative_radius, normalized) for i in range(thread_num)])
 
     # pool.map(generateConcRingDataset, [l for l in [to_extract[i * mesh_for_thread: (i * mesh_for_thread) + mesh_for_thread] for i in range(thread_num)]])

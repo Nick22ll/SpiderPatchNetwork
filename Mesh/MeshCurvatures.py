@@ -162,8 +162,9 @@ def eig2(Dxx=None, Dxy=None, Dyy=None):
 
 
 def VectorRotationMatrix(v=None):
+    rng = np.random.default_rng(22)
     v = np.ravel(v).conj().transpose() / np.sqrt(sum(v ** 2))
-    k = np.random.rand(3)
+    k = rng.random(3)
     l = np.hstack(((k[1] * v[2]) - (k[2] * v[1]), (k[2] * v[0]) - (k[0] * v[2]), (k[0] * v[1]) - (k[1] * v[0])))
     l /= np.sqrt(sum(l ** 2))
     k = np.hstack(((l[1] * v[2]) - (l[2] * v[1]), (l[2] * v[0]) - (l[0] * v[2]), (l[0] * v[1]) - (l[1] * v[0])))

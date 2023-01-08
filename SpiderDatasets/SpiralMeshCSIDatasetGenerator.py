@@ -26,7 +26,7 @@ def generateSpiralMeshCSIDataset(to_extract="all"):
     warnings.filterwarnings("ignore", category=RuntimeWarning)
     print(f"Loading SpiralMeshCSI Dataset from: {mesh_dataset_path}")
     import re
-    random.seed(22)
+    rng = np.random.default_rng(22)
     radius, rings, points = 20, 4, 6
     node_radius, node_rings, node_points = 10, 4, 6
     resolution_level = "level_0"
@@ -57,11 +57,11 @@ def generateSpiralMeshCSIDataset(to_extract="all"):
                 mesh_remaining -= 1
                 with open(f"{mesh_dataset_path}/{label}/{mesh_sample_id}/resolution_{resolution_level}/{mesh_filename}", "rb") as pkl_file:
                     mesh = pkl.load(pkl_file)
-                    random.seed(666)
+                    rng = np.random.default_rng(666)
                     boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil(1.4 * radius) / mesh.edge_length))
                     seed_point_sequence = [x for x in range(len(mesh.vertices) - 1) if x not in boundary_vertices]
-                    seed_point_sequence = list(np.unique(random.sample(seed_point_sequence, int(len(seed_point_sequence) * 0.30))))
-                    random.shuffle(seed_point_sequence)
+                    seed_point_sequence = list(rng.choice(seed_point_sequence, int(len(seed_point_sequence) * 0.30), replace=False))
+                    rng.shuffle(seed_point_sequence)
                     samples = []
                     for iteration, seed_point in enumerate(seed_point_sequence):
                         if len(samples) >= graph_for_mesh or iteration > 300:
@@ -96,11 +96,11 @@ def generateSpiralMeshCSIDataset(to_extract="all"):
                     mesh_remaining -= 1
                     with open(f"{mesh_dataset_path}/{label}/{mesh_sample_id}/{resolution_level}/{mesh_filename}", "rb") as pkl_file:
                         mesh = pkl.load(pkl_file)
-                        random.seed(666)
+                        rng = np.random.default_rng(22)
                         boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil(1.4 * radius) / mesh.edge_length))
                         seed_point_sequence = [x for x in range(len(mesh.vertices) - 1) if x not in boundary_vertices]
-                        seed_point_sequence = list(np.unique(random.sample(seed_point_sequence, int(len(seed_point_sequence) * 0.30))))
-                        random.shuffle(seed_point_sequence)
+                        seed_point_sequence = list(rng.choice(seed_point_sequence, int(len(seed_point_sequence) * 0.30), replace=False))
+                        rng.shuffle(seed_point_sequence)
                         samples = []
                         for iteration, seed_point in enumerate(seed_point_sequence):
                             if len(samples) >= graph_for_mesh or iteration > 100:

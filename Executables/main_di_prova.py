@@ -1,69 +1,57 @@
-import os
 import pickle
 
-import multiprocessing
-import os
-import re
-import pickle
-import random
-import warnings
-
+import matplotlib.cm as cm
+import matplotlib.colors as colors
 import numpy as np
-import pickle as pkl
-
-from mayavi.tools.helper_functions import quiver3d
-from sklearn.metrics import pairwise_distances
+import torch
+from numpy import percentile
 from tqdm import tqdm
 
-from Executables.main_DatasetGenerator import generateMeshGraphDatasetFromPatches
-from Mesh import *
-from math import floor
+from SpiderPatch.SpiderPatch import SP_distanceV1, SP_distanceV2
 
-from Mesh.Mesh import Mesh
-from SHREC_Utils import subdivide_for_mesh
-from CSIRS.CSIRS import CSIRSv2, CSIRSv2Spiral
-from SpiderDatasets.PatchDatasetGenerator import generateSPDatasetFromConcRings
-from SpiderPatch.SpiderPatch import SpiderPatchLRF
-from SpiderPatch.SuperPatch import SuperPatch_preloaded
+
+def IQROutliers(data, iqr_multiplier=1.5):
+    q25, q75 = percentile(data, 25), percentile(data, 75)
+    iqr = q75 - q25
+    cut_off = iqr * iqr_multiplier
+    lower, upper = q25 - cut_off, q75 + cut_off
+    return lower, upper
+
+
+def SDOutliers(data, deviations=3):
+    data_mean, data_std = np.mean(data), np.std(data)
+    cut_off = data_std * deviations
+    lower, upper = data_mean - cut_off, data_mean + cut_off
+    return lower, upper
+
+
+def set_node_weights(dataset):
+    for mesh_graph in tqdm(dataset.graphs):
+        for patch in mesh_graph.patches:
+            weights = []
+            for vertex_id, vertex in enumerate(patch.ndata["vertices"]):
+                edge_indices = np.where(vertex_id == patch.edges()[1])[0]
+                weight = torch.mean(patch.edata["node_distance"][edge_indices])
+                weights.append(weight)
+            patch.ndata["weight"] = torch.tensor(np.array(weights).reshape((-1, 1)), dtype=torch.float32)
+    dataset.save_to(f"Datasets")
 
 
 def main():
-    # with open(f"U:\AssegnoDiRicerca\PythonProject\Datasets\SpiderPatches\SHREC17_R10_R4_P6_CSIRSv2Spiral\class_0\id_0/resolution_level_0\spiderPatches609.pkl", "rb") as mesh_file:
-    #     concRingsA = pkl.load(mesh_file)
-
-    with open("U:\AssegnoDiRicerca\PythonProject\Retrieval\Datasets\SHREC17_RR10R4P6_CSIRSv2Spiral_HOMOGENEOUS3.pkl", "rb") as file:
-        dataset = pkl.load(file)
-        for graph in dataset.graphs:
-            with open("U:\AssegnoDiRicerca\PythonProject\Datasets\Meshes\SHREC17\class_3\id_36/resolution_level_3\mesh280.pkl", "rb") as file:
-                mesh = pkl.load(file)
-            mesh.drawWithSpiderPatches([graph])
-    #
-    # with open("U:\AssegnoDiRicerca\PythonProject\Datasets\Meshes\SHREC17\class_3\id_36/resolution_level_3\mesh280.pkl", "rb") as file:
-    #     mesh = pkl.load(file)
-    # with open("U:\AssegnoDiRicerca\PythonProject\Retrieval\Datasets\SHREC17_R10R4P6_CSIRSv2Spiral_HOMOGENEOUS3.pkl", "rb") as file:
-    #     dataset = pkl.load(file)
-    #     for graph in dataset.graphs:
-    #         mesh.drawWithSpiderPatches([graph])
-
-    with open(f"U:\AssegnoDiRicerca\PythonProject\Datasets\ConcentricRings\SHREC17_RR10_R4_P6_CSIRSv2Spiral\class_1\id_17/resolution_level_3\concRing519.pkl", "rb") as file:
-        concRings = pickle.load(file)
-    with open(f"U:\AssegnoDiRicerca\PythonProject\Datasets\Meshes\SHREC17\class_1\id_17/resolution_level_3\mesh519.pkl", "rb") as mesh_file:
+    with open("U:\AssegnoDiRicerca\PythonProject\Datasets/NormalizedMeshes\SHREC17\class_0\id_0/resolution_level_3\mesh448.pkl", "rb") as mesh_file:
         mesh = pickle.load(mesh_file)
-    for concRing in concRings:
-        mesh.drawWithConcRings(concRing)
+    with open("U:\AssegnoDiRicerca\PythonProject\Datasets\SpiderPatches\SHREC17_R0.1_R6_P8_CSIRSv2Spiral\class_0\id_0/resolution_level_3\spiderPatches448.pkl", "rb") as conc_file:
+        spider_patches = pickle.load(conc_file)
+    seed_spider = spider_patches[0]
+    rng = np.random.default_rng(17)
+    spider_patches_to_draw = rng.choice(spider_patches[1:], 300, replace=False)
+    distances = [SP_distanceV1(seed_spider, SP, "local_depth") for SP in spider_patches_to_draw]
+    norm = colors.Normalize(vmin=0, vmax=max(distances))
+    color_map = cm.ScalarMappable(norm=norm, cmap=cm.get_cmap('hot'))
+    rgbs = color_map.to_rgba(distances)[:, :3]
 
-    load_path = "U:\AssegnoDiRicerca\PythonProject\Datasets\ConcentricRings\SHREC17_R10_RI4_P6_CSIRSv2Spiral"
-    for label in os.listdir(load_path):
-        for id in os.listdir(f"{load_path}/{label}"):
-            for resolution_level in os.listdir(f"{load_path}/{label}/{id}"):
-                conc_filename = os.listdir(f"{load_path}/{label}/{id}/{resolution_level}")[0]
-                with open(f"{load_path}/{label}/{id}/{resolution_level}/{conc_filename}", "rb") as file:
-                    concRings = pickle.load(file)
-                with open(f"U:\AssegnoDiRicerca\PythonProject\Datasets\Meshes\SHREC17/{label}/{id}/{resolution_level}/{conc_filename.replace('concRing', 'mesh')}", "rb") as mesh_file:
-                    mesh = pickle.load(mesh_file)
-                for concRing in concRings[0:10]:
-                    mesh.drawWithConcRings(concRing)
-
+    ord_distances_idx = np.hstack((np.argsort(distances)[:100], np.argsort(distances)[-1]))
+    mesh.drawWithSpiderPatches(np.hstack((np.array(seed_spider), spider_patches_to_draw[ord_distances_idx])), np.vstack(((0, 1, 0), rgbs[ord_distances_idx])))
 
 if __name__ == "__main__":
     main()
