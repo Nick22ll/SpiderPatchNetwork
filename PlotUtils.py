@@ -71,6 +71,9 @@ def plot_grad_flow(named_parameters, verbose=1, legend=False):
 
     Usage: Plug this function in Trainer class after loss.backwards() as
     "plot_grad_flow(self.model.named_parameters())" to visualize the gradient flow"""
+    # plt.rcParams['figure.dpi'] = 300
+    # plt.rcParams["figure.figsize"] = (plt.rcParamsDefault["figure.figsize"][0] * 2,  plt.rcParamsDefault["figure.figsize"][1])
+
     ave_grads = []
     max_grads = []
     layers = []
@@ -102,6 +105,9 @@ def plot_grad_flow(named_parameters, verbose=1, legend=False):
     plt.tight_layout()
     plt.show()
     plt.close()
+
+    plt.rcParams["figure.figsize"] = plt.rcParamsDefault["figure.figsize"]
+    plt.rcParams['figure.dpi'] = plt.rcParamsDefault['figure.dpi']
 
 
 def plot_training_statistics(path, filename, epochs, losses, val_accuracies, val_epochs, val_losses=None, title="Training Statistics"):

@@ -25,6 +25,7 @@ def generateMeshDataset(to_extract="all", normalize=False, resolution_level=None
     print(f"Generation of meshes STARTED!")
 
     if to_extract == "all":
+        to_extract = [i for i in range(len(meshes))]
         mesh_to_extract = meshes
     else:
         mesh_to_extract = [meshes[i] for i in to_extract]
@@ -46,16 +47,16 @@ def generateMeshDataset(to_extract="all", normalize=False, resolution_level=None
 
             os.makedirs(f"{save_path}", exist_ok=True)
             os.makedirs(f"{save_path}/class_{str(label)}", exist_ok=True)
-            os.makedirs(f"{save_path}/class_{str(label)}/id_{sample_id}", exist_ok=True)
-            os.makedirs(f"{save_path}/class_{str(label)}/id_{sample_id}/resolution_{level}", exist_ok=True)
-            with open(f"{save_path}/class_{str(label)}/id_{sample_id}/resolution_{level}/mesh{mesh_id}.pkl", 'wb') as file:
+            os.makedirs(f"{save_path}/class_{str(label)}/id_{to_extract[sample_id]}", exist_ok=True)
+            os.makedirs(f"{save_path}/class_{str(label)}/id_{to_extract[sample_id]}/resolution_{level}", exist_ok=True)
+            with open(f"{save_path}/class_{str(label)}/id_{to_extract[sample_id]}/resolution_{level}/mesh{mesh_id}.pkl", 'wb') as file:
                 pickle.dump(mesh, file, protocol=-1)
 
 
-def parallelGenerateMeshDataset(to_extract=None, normalize=False, resolution_level=None):
-    if to_extract is None:
-        to_extract = [i for i in range(180)]
-    thread_num = 6
+def parallelGenerateMeshDataset(to_extract="all", normalized=False, resolution_level=None):
+    if to_extract == "all":
+        to_extract = [i for i in range(len(subdivide_for_mesh()))]
+    thread_num = 10
+    mesh_for_thread = int(len(to_extract) / thread_num) + 1
     pool = multiprocessing.Pool(processes=thread_num)
-    mesh_for_thread = int(len(to_extract) / thread_num)
-    pool.starmap(generateMeshDataset, [(l, normalize, resolution_level) for l in [to_extract[i * mesh_for_thread: (i * mesh_for_thread) + mesh_for_thread] for i in range(thread_num)]])
+    pool.starmap(generateMeshDataset, [(to_extract[i * mesh_for_thread: (i * mesh_for_thread) + mesh_for_thread], normalized, resolution_level) for i in range(thread_num)])

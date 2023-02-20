@@ -1,11 +1,117 @@
 import dgl
+import numpy as np
 
 import torch
 import torch.nn as nn
-from torch_geometric.nn import GraphNorm
-from dgl.nn.pytorch import GraphConv
+from dgl.nn.pytorch import GraphConv, JumpingKnowledge
+from tqdm import tqdm
 
+from Networks.GATSpiderPatchModules import GATNodeWeigher
+from Networks.NormalizationModules import UnitedNormCommon
 from Networks.UniversalReadout import UniversalReadout
+
+
+class CONVSPEmbedder(nn.Module):
+    def __init__(self, feat_in_dim, readout_function="AR", jumping_mode="lstm", layers_num=3, weigher_mode=None, weights_in_dim=0, dropout=0, *args, **kwargs):
+        super(CONVSPEmbedder, self).__init__()
+
+        self.JUMPING_MODE = jumping_mode
+
+        ####  Layers  ####
+        self.convolutions = nn.ModuleList()
+        for _ in range(layers_num):
+            self.convolutions.append(GraphConv(feat_in_dim, feat_in_dim, bias=False))
+
+        ####  Activation Functions  ####
+        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.1)
+
+        ####  Normalization Layers  ####
+        self.normalizations = nn.ModuleList()
+        for i in range(layers_num):
+            self.normalizations.append(UnitedNormCommon(feat_in_dim))
+
+        ####  Readouts Utils  ####
+        self.weigher_mode = weigher_mode
+
+        if self.weigher_mode is not None:
+            self.weighers = nn.ModuleList()
+            for i in range(layers_num):
+                if self.weigher_mode == "sp_weights":
+                    self.weighers.append(nn.Identity())
+                elif self.weigher_mode == "attn_weights":
+                    self.weighers.append(GATNodeWeigher(feat_in_dim, weights_in_dim, False))
+                elif self.weigher_mode == "attn_weights+feats":
+                    self.weighers.append(GATNodeWeigher(feat_in_dim, weights_in_dim, True))
+                else:
+                    raise "Wrong Weigher Mode"
+
+        #### Readout Layers  ####
+        if readout_function == "UR":
+            self.readouts = nn.ModuleList()
+            self.readouts.append(UniversalReadout(feat_in_dim))
+            for i in range(1, layers_num):
+                self.readouts.append(UniversalReadout(feat_in_dim))
+        elif readout_function == "AR":
+            self.readouts = []
+            for i in range(layers_num):
+                self.readouts.append(dgl.mean_nodes)
+        else:
+            raise "Unknown Readout Function"
+
+        ####   JumpKnowledge Modules  ####
+        if self.JUMPING_MODE == "lstm" or self.JUMPING_MODE == "max":
+            if readout_function == "UR":
+                self.embed_dim = self.readouts[0].readout_dim
+            else:
+                self.embed_dim = feat_in_dim
+            self.jumping = JumpingKnowledge(mode=self.JUMPING_MODE, in_feats=self.embed_dim, num_layers=layers_num)
+        elif self.JUMPING_MODE == "cat":
+            self.jumping = JumpingKnowledge(mode=self.JUMPING_MODE)
+            if readout_function == "UR":
+                self.embed_dim = sum(r.readout_dim for r in self.readout_list)
+            else:
+                self.embed_dim = feat_in_dim + sum([feat_in_dim for i in range(1, layers_num)])
+        elif self.JUMPING_MODE is None:
+            if readout_function == "UR":
+                self.embed_dim = self.readout_list[0].readout_dim
+            else:
+                self.embed_dim = feat_in_dim
+
+        ####  Dropout  ####
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, spider_patch, node_feats):
+        updated_feats = node_feats
+        embeddings = []
+        for idx, conv_layer in enumerate(self.convolutions):
+            updated_feats = conv_layer(spider_patch, updated_feats)
+            updated_feats = self.normalizations[idx](spider_patch, updated_feats)
+            updated_feats = self.LeakyReLU(updated_feats)
+            updated_feats = self.dropout(updated_feats)
+            spider_patch.ndata['updated_feats'] = updated_feats
+
+            if self.weigher_mode is not None:
+                spider_patch.ndata['node_weights'] = self.weighers[idx](spider_patch, "aggregated_weights", "updated_feats")
+                weights_name = 'node_weights'
+            else:
+                weights_name = None
+
+            embeddings.append(self.readouts[idx](spider_patch, 'updated_feats', weights_name))
+
+        if self.JUMPING_MODE is None:
+            return self.LeakyReLU(embeddings[-1])
+
+        return self.LeakyReLU(self.jumping(embeddings))
+
+    def extractBestNormLayers(self):
+        bests = []
+        for idx, norm_layer in enumerate(self.normalizations):
+            norm_powers = []
+            for lambda_type in norm_layer.lambdas:
+                norm_powers.append(torch.norm(lambda_type).detach().cpu().numpy())
+            bests.append(norm_layer.norm_names[np.argmax(norm_powers)])
+            tqdm.write(f"Best Norm for PATCH embedder normalizer {idx} is {bests[-1]}")
+        return bests
 
 
 class JumpResSPEmbedder(nn.Module):

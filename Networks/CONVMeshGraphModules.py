@@ -4,55 +4,92 @@ import dgl
 import numpy as np
 import torch
 import torch.nn as nn
-from torch_geometric.nn import GraphNorm
-from dgl.nn.pytorch import GraphConv, SortPooling
+from dgl.nn.pytorch import GraphConv, SortPooling, JumpingKnowledge
+from tqdm import tqdm
 
+from Networks.NormalizationModules import UnitedNormCommon
 from Networks.UniversalReadout import UniversalReadout
 
 
-class JumpGMEmbedder(nn.Module):
-    def __init__(self, in_channels, layers_num, dropout):
-        super(JumpGMEmbedder, self).__init__()
+class CONVMGEmbedder(nn.Module):
+    def __init__(self, feat_in_channels, readout_function="AR", jumping_mode=None, layers_num=3, dropout=0, *args, **kwargs):
+        super(CONVMGEmbedder, self).__init__()
+
+        self.JUMPING_MODE = jumping_mode
 
         ####  Layers  ####
-        # out_channels = in_channels * 4
-        # self.chn_fixer = nn.Linear(in_channels, out_channels, bias=False)
-        out_channels = in_channels
         self.conLayers = nn.ModuleList()
         for _ in range(layers_num):
-            self.conLayers.append(GraphConv(out_channels, out_channels, bias=False))
+            self.conLayers.append(GraphConv(feat_in_channels, feat_in_channels, bias=False))
 
         ####  Activation Functions  ####
-        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.01)
-
-        #### Readout Layer ####
-        self.readouts = nn.ModuleList()
-        for _ in range(layers_num):
-            self.readouts.append(UniversalReadout(out_channels, dropout))
+        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.2)
 
         ####  Normalization Layers  ####
         self.normalizations = nn.ModuleList()
-        for _ in range(layers_num):
-            self.normalizations.append(GraphNorm(out_channels, eps=1e-5))
+        self.normalizations.append(UnitedNormCommon(feat_in_channels))
+        for i in range(1, layers_num):
+            self.normalizations.append(UnitedNormCommon(feat_in_channels))
+
+        ####  Readout Function  ####
+        if readout_function == "UR":
+            self.readout_list = nn.ModuleList()
+            for i in range(layers_num):
+                self.readout_list.append(UniversalReadout(feat_in_channels))
+        elif readout_function == "AR":
+            self.readout_list = []
+            for i in range(layers_num):
+                self.readout_list.append(dgl.mean_nodes)
+        else:
+            raise "Unknown Readout Function"
+
+        ####   JumpKnowledge Modules  ####
+        if self.JUMPING_MODE == "lstm" or self.JUMPING_MODE == "max":
+            if readout_function == "UR":
+                self.embed_dim = self.readout_list[0].readout_dim
+            else:
+                self.embed_dim = feat_in_channels
+            self.jumping = JumpingKnowledge(mode=self.JUMPING_MODE, in_feats=self.embed_dim, num_layers=layers_num)
+        elif self.JUMPING_MODE == "cat":
+            self.jumping = JumpingKnowledge(mode=self.JUMPING_MODE)
+            if readout_function == "UR":
+                self.embed_dim = sum(r.readout_dim for r in self.readout_list)
+            else:
+                self.embed_dim = feat_in_channels + sum([feat_in_channels for i in range(1, layers_num)])
+        elif self.JUMPING_MODE is None:
+            if readout_function == "UR":
+                self.embed_dim = self.readout_list[0].readout_dim
+            else:
+                self.embed_dim = feat_in_channels
 
         ####  Dropout  ####
         self.dropout = nn.Dropout(dropout)
 
-        self.embed_dim = self.readouts[0].readout_dim * layers_num
-
-    def forward(self, g, node_feats):
+    def forward(self, mesh_graph, node_feats):
         # node_feats = self.chn_fixer(node_feats)
         updated_feats = node_feats
-        readout = torch.empty(0, device=node_feats.device)
+        embeddings = []
         for idx, conv_layer in enumerate(self.conLayers):
-            updated_feats = conv_layer(g, updated_feats)
-            updated_feats = self.normalizations[idx](updated_feats)
+            updated_feats = conv_layer(mesh_graph, updated_feats)
+            updated_feats = self.normalizations[idx](mesh_graph, updated_feats)
             updated_feats = self.LeakyReLU(updated_feats)
-            with g.local_scope():
-                g.ndata['updated_feats'] = updated_feats
-                readout = torch.hstack((readout, self.readouts[idx](g, 'updated_feats')))
+            updated_feats = self.dropout(updated_feats)
+            mesh_graph.ndata['updated_feats'] = updated_feats
+            embeddings.append(self.readout_list[idx](mesh_graph, 'updated_feats'))
 
-        return self.LeakyReLU(readout)
+        if self.JUMPING_MODE is None:
+            return self.LeakyReLU(embeddings[-1])
+
+        return self.LeakyReLU(self.jumping(embeddings))
+
+    def extractBestNormLayers(self):
+        bests = []
+        for idx, norm_layer in enumerate(self.normalizations):
+            norm_powers = []
+            for lambda_type in norm_layer.lambdas:
+                norm_powers.append(torch.norm(lambda_type).detach().cpu().numpy())
+            bests.append(norm_layer.norm_names[np.argmax(norm_powers)])
+            tqdm.write(f"Best Norm for MESH embedder normalizer {idx} is {bests[-1]}")
 
     def save(self, path):
         torch.save(self.state_dict(), path)

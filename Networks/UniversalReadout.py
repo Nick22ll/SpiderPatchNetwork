@@ -6,14 +6,14 @@ import torch.nn as nn
 
 
 class UniversalReadout(nn.Module):
-    def __init__(self, in_dim, dropout):
+    def __init__(self, in_dim):
         super(UniversalReadout, self).__init__()
 
         self.readout_dim = in_dim // 4
 
         ####  Layers  ####
-        self.phi = Phi(in_dim, dropout)
-        self.rho = Rho(in_dim // 2, dropout)
+        self.phi = Phi(in_dim, dropout=0.3)
+        self.rho = Rho(in_dim // 2, dropout=0.3)
 
     def forward(self, graph, features_name, weights=None):
         graph.ndata["phis"] = self.phi(graph.ndata[features_name])  # With normalization put self.phi(graph.ndata[features_name][:, None, :])
@@ -38,7 +38,7 @@ class Phi(nn.Module):
         self.linear2 = nn.Linear(in_dim // 2, in_dim // 2, bias=False)
 
         ####  Activation Functions  ####
-        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.01)
+        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.1)
 
         ####  Normalization Layers  ####
         # self.LinNorm1 = nn.InstanceNorm1d(int(in_dim/2), eps=1e-05, momentum=0.1)
@@ -55,12 +55,12 @@ class Phi(nn.Module):
         updated_feats = self.linear1(features)
         # updated_feats = self.LinNorm1(updated_feats)
         updated_feats = self.LeakyReLU(updated_feats)
+        updated_feats = self.dropout(updated_feats)
 
         updated_feats = self.linear2(updated_feats)
         # updated_feats = self.LinNorm2(updated_feats)
         updated_feats = self.LeakyReLU(updated_feats)
-
-        # updated_feats = self.dropout(updated_feats)
+        updated_feats = self.dropout(updated_feats)
 
         return updated_feats
 
@@ -82,7 +82,7 @@ class Rho(nn.Module):
         self.linear2 = nn.Linear(in_dim // 2, in_dim // 2, bias=False)
 
         ####  Activation Functions  ####
-        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.2)
+        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.1)
 
         ####  Normalization Layers  ####
         # self.LinNorm1 = nn.InstanceNorm1d(1, eps=1e-05, momentum=0.1)
@@ -99,12 +99,12 @@ class Rho(nn.Module):
         updated_feats = self.linear1(features)
         # updated_feats = self.LinNorm1(updated_feats)
         updated_feats = self.LeakyReLU(updated_feats)
+        updated_feats = self.dropout(updated_feats)
 
         updated_feats = self.linear2(updated_feats)
         # updated_feats = self.LinNorm2(updated_feats)
         updated_feats = self.LeakyReLU(updated_feats)
-
-        # updated_feats = self.dropout(updated_feats)
+        updated_feats = self.dropout(updated_feats)
 
         return updated_feats
 

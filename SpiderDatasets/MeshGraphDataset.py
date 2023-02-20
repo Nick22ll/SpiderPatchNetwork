@@ -332,7 +332,7 @@ class MeshGraphDataset(DGLDataset):
             loaded_dataset = pkl.load(dataset_file)
         gc.enable()
         self.graphs = loaded_dataset.graphs
-        self.labels = loaded_dataset.labels
+        self.labels = np.array(loaded_dataset.labels, dtype=np.int64)
         self.sample_id = loaded_dataset.sample_id
         self.mesh_id = loaded_dataset.mesh_id
         self._name = dataset_name
@@ -354,7 +354,7 @@ class MeshGraphDataset(DGLDataset):
         import re
         rng = np.random.default_rng(22)
         self.graphs = np.empty(0)
-        self.labels = np.empty(0)
+        self.labels = np.empty(0, dtype=np.int64)
         self.sample_id = np.empty(0)
         self.mesh_id = np.empty(0)
 
