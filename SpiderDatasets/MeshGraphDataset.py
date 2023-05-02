@@ -191,6 +191,34 @@ class MeshGraphDataset(DGLDataset):
 
         return train_indices, test_indices
 
+    def getCrossValidationMask(self, train_meshes_per_class=11):  # TODO funzione fatta velocemente per l'articolo, non funziona per valori diversi da 11!!!!!!!!
+
+        unique_labels, counts = np.unique(self.labels, return_counts=True)
+        mesh_per_label = min(counts / (len(self.graphs) / len(np.unique(self.sample_id))))
+        k_fold = int(mesh_per_label // (mesh_per_label - train_meshes_per_class))
+
+        cross_validation_masks = {}
+        for fold in range(k_fold):
+            cross_validation_masks[fold] = {}
+            train_indices = np.empty(0, dtype=int)
+            test_indices = np.empty(0, dtype=int)
+            for label in unique_labels:
+                label_indices = np.where(self.labels == label)[0]
+                uniques_mesh_id = np.unique(self.mesh_id[label_indices])
+                to_test = uniques_mesh_id[fold]
+
+                for mesh_id in [to_test]:
+                    mesh_id_indices = np.where(self.mesh_id == mesh_id)[0]
+                    test_indices = np.hstack((test_indices, mesh_id_indices))
+
+                for mesh_id in list(np.delete(uniques_mesh_id, np.argwhere(np.isin(uniques_mesh_id, to_test)))):
+                    mesh_id_indices = np.where(self.mesh_id == mesh_id)[0]
+                    train_indices = np.hstack((train_indices, mesh_id_indices))
+            cross_validation_masks[fold]["train_indices"] = train_indices
+            cross_validation_masks[fold]["test_indices"] = test_indices
+
+        return cross_validation_masks
+
     def normalize(self, fit_indices):
         feats_names = self.getSpiderPatchNodeFeatsNames()
         if "vertices" in feats_names:

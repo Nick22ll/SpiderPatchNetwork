@@ -1,9 +1,9 @@
 import gc
-import random
+import os
 
+import dgl
+import numpy as np
 import scipy.io
-from sklearn.metrics import pairwise_distances
-from sklearn.preprocessing import MinMaxScaler
 
 from CSIRS.CSIRS import CSIRSv2Spiral
 from Mesh.Mesh import Mesh
@@ -12,9 +12,7 @@ from SpiderDatasets.SpiderPatchDataset import SpiderPatchDataset
 from SpiderPatch.SpiderPatch import SpiderPatch
 import warnings
 import pickle as pkl
-import numpy as np
 
-from Networks.CONVNetworks import *
 from tqdm import tqdm
 
 
@@ -23,7 +21,7 @@ class RetrievalDataset(SpiderPatchDataset):
         self.mesh_id = mesh_id
         super().__init__(dataset_name=dataset_name, graphs=spiral_spider_patches, labels=labels)
 
-    def generate(self, mesh_path, labels_path, radius, rings, points, relative_radius):
+    def generate(self, mesh_path, labels_path, radius, rings, points, relative_radius, CSIRS_type=CSIRSv2Spiral):
         warnings.filterwarnings("ignore")
         with open(mesh_path, "rb") as mesh_file:
             mesh = pkl.load(mesh_file)
@@ -33,8 +31,8 @@ class RetrievalDataset(SpiderPatchDataset):
 
         if relative_radius:
             radius = radius * mesh.edge_length
-        boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil(1.5 * radius)))
-        rng = np.random.default_rng(222)
+        boundary_vertices = mesh.getBoundaryVertices(neighbors_level=int(np.ceil(radius / mesh.edge_length)))
+        rng = np.random.default_rng(17)
         seed_point_sequence = [i for i in range(len(mesh.vertices))]
         rng.shuffle(seed_point_sequence)
         self.graphs = np.empty(0)
@@ -43,8 +41,8 @@ class RetrievalDataset(SpiderPatchDataset):
         for seed_point in tqdm(seed_point_sequence):
             if seed_point in boundary_vertices:
                 continue
-            concentric_ring = CSIRSv2Spiral(mesh, seed_point, radius, rings, points)
-            if not concentric_ring.firstValidRings(1):
+            concentric_ring = CSIRS_type(mesh, seed_point, radius, rings, points)
+            if not concentric_ring.firstValidRings(2):
                 continue
             try:
                 self.graphs = np.append(self.graphs, SpiderPatch(concentric_ring, mesh, seed_point))
@@ -54,70 +52,6 @@ class RetrievalDataset(SpiderPatchDataset):
             self.seed_point_indices = np.append(self.seed_point_indices, seed_point)
 
         self.save_to(f"../Retrieval/Datasets")
-
-    def getTrainTestMask(self, train_samples=200, percentage=False):
-        rng = np.random.default_rng(22)
-        train_indices = []
-        test_indices = []
-        for label in np.unique(self.labels):
-            label_indices = np.where(self.labels == label)[0]
-            if percentage:
-                train_label_indices = rng.choice(label_indices, int((train_samples / 100) * len(label_indices)), replace=False)
-            else:
-                train_label_indices = rng.choice(label_indices, train_samples, replace=False)
-            test_indices.extend(list(np.delete(label_indices, np.argwhere(np.isin(label_indices, train_label_indices)))))
-            train_indices.extend(list(train_label_indices))
-        return train_indices, test_indices
-
-    def normalize(self, fit_indices):
-        feats_names = self.getNodeFeatsName()
-        if "vertices" in feats_names:
-            feats_names.remove("vertices")
-        if "weight" in feats_names:
-            feats_names.remove("weight")
-
-        node_normalizers = {}
-        for feature in feats_names:
-            node_normalizers[feature] = MinMaxScaler((0, 1))
-
-        for spider_patch in tqdm(self.graphs[fit_indices], position=0, leave=True, desc=f"Normalizer Fitting: ", colour="white", ncols=80):
-            for feature in feats_names:
-                if spider_patch.node_attr_schemes()[feature].shape == ():
-                    node_normalizers[feature].partial_fit(spider_patch.ndata[feature].reshape((-1, 1)))
-                else:
-                    node_normalizers[feature].partial_fit(spider_patch.ndata[feature])
-
-        for spider_patch in tqdm(self.graphs, position=0, leave=True, desc=f"Normalizing: ", colour="white", ncols=80):
-            for feature in feats_names:
-                if spider_patch.node_attr_schemes()[feature].shape == ():
-                    spider_patch.ndata[feature] = torch.tensor(node_normalizers[feature].transform(spider_patch.ndata[feature].reshape((-1, 1))), dtype=torch.float32)
-                else:
-                    spider_patch.ndata[feature] = torch.tensor(node_normalizers[feature].transform(spider_patch.ndata[feature]), dtype=torch.float32)
-
-        return node_normalizers
-
-    def normalize_edge(self, fit_indices):
-
-        edge_normalizers = {}
-        feats_names = self.getEdgeFeatsName()
-        for feature in feats_names:
-            edge_normalizers[feature] = MinMaxScaler((0, 1))
-
-        for spider_patch in tqdm(self.graphs[fit_indices], position=0, leave=True, desc=f"Normalizer Fitting: ", colour="white", ncols=80):
-            for feature in feats_names:
-                if spider_patch.edge_attr_schemes()[feature].shape == ():
-                    edge_normalizers[feature].partial_fit(spider_patch.edata[feature].reshape((-1, 1)))
-                else:
-                    edge_normalizers[feature].partial_fit(spider_patch.edata[feature])
-
-        for spider_patch in tqdm(self.graphs, position=0, leave=True, desc=f"Normalizing: ", colour="white", ncols=80):
-            for feature in edge_normalizers.keys():
-                if spider_patch.edge_attr_schemes()[feature].shape == ():
-                    spider_patch.edata[feature] = torch.tensor(edge_normalizers[feature].transform(spider_patch.edata[feature].reshape((-1, 1))), dtype=torch.float32)
-                else:
-                    spider_patch.edata[feature] = torch.tensor(edge_normalizers[feature].transform(spider_patch.edata[feature]), dtype=torch.float32)
-
-        return edge_normalizers
 
     def save_to(self, save_path=None):
         os.makedirs(save_path, exist_ok=True)
@@ -151,22 +85,25 @@ class RetrievalDataset(SpiderPatchDataset):
         self._name = dataset_name
 
 
-def generate_mesh(path, name, curvature):
+def generateMesh(path, name):
     mesh = Mesh()
     mesh.loadFromMeshFile(path)
-    mesh.computeCurvaturesTemp(curvature)
-    mesh.save(f"../Retrieval/Mesh/{name}.pkl")
+    for i in tqdm(range(5)):
+        mesh.computeCurvatures(i)
+    os.makedirs(f"../Retrieval/Meshes", exist_ok=True)
+    mesh.save(f"../Retrieval/Meshes/{name}.pkl")
 
 
-def generate_labels(mesh_name, labels_path):
+def generateLabels(mesh_name, labels_path):
     mat = scipy.io.loadmat(labels_path)
     face_labels = mat["label"].flatten()
-    with open(f"../Retrieval/Mesh/{mesh_name}.pkl", "rb") as mesh_file:
+    with open(f"../Retrieval/Meshes/{mesh_name}.pkl", "rb") as mesh_file:
         mesh = pkl.load(mesh_file)
     vertex_labels = []
     for face_list in mesh.vertex_faces:
         vertex_labels.append(np.argmax(np.bincount(face_labels[face_list])))
     for id, elem in enumerate(np.unique(vertex_labels)):
         vertex_labels = [id if x == elem else x for x in vertex_labels]
-    with open(f"../Retrieval/Labels/{mesh_name.replace('BC', '').replace('LC', '')}.pkl", "wb") as label_file:
+    os.makedirs(f"../Retrieval/Labels", exist_ok=True)
+    with open(f"../Retrieval/Labels/{mesh_name}.pkl", "wb") as label_file:
         pkl.dump(vertex_labels, label_file)

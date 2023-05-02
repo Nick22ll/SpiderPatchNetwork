@@ -15,9 +15,12 @@ from SpiderPatch.SpiderPatch import SpiderPatch
 
 class SpiderPatchDataset(DGLDataset):
     def __init__(self, dataset_name="", graphs=None, labels=None):
+
         self.graphs = np.array(graphs)
         self.labels = np.array(labels)
         self.seed_point_indices = np.empty(0)
+        self.node_normalizers = {}
+        self.edge_normalizers = {}
         super().__init__(name=dataset_name)
 
     def process(self):
@@ -44,67 +47,89 @@ class SpiderPatchDataset(DGLDataset):
             warnings.filterwarnings("ignore")
             self.labels = torch.tensor(self.labels, device=device, dtype=torch.int64)
 
-    def normalize(self, node_normalizers=None):
-        """
-        Normalizes node data of the graphs. The normalization process is applied per feature
-        @param node_normalizers: (dict) { "feat_name" : sklearn.preprocessing.Scaler}, a dict that map a feature to his normalizer. If None normalizers are calculated at runtime.
-        @return: node_normalizers: (dict) { "feat_name" : sklearn.preprocessing.Scaler}, a dict that map a feature to his normalizer used in the normalization process.
-        """
+    def getTrainTestMask(self, train_samples=200, percentage=False):
+        rng = np.random.default_rng(22)
+        train_indices = []
+        test_indices = []
+        for label in np.unique(self.labels):
+            label_indices = np.where(self.labels == label)[0]
+            if percentage:
+                train_label_indices = rng.choice(label_indices, int((train_samples / 100) * len(label_indices)), replace=False)
+            else:
+                train_label_indices = rng.choice(label_indices, train_samples, replace=False)
+            test_indices.extend(list(np.delete(label_indices, np.argwhere(np.isin(label_indices, train_label_indices)))))
+            train_indices.extend(list(train_label_indices))
+        return train_indices, test_indices
 
-        if node_normalizers is None:
-            node_normalizers = {}
-            feats_names = self.getNodeFeatsName()
-            if "vertices" in feats_names:
-                feats_names.remove("vertices")
-            if "weight" in feats_names:
-                feats_names.remove("weight")
+    def train_normalizers(self, fit_indices):
+        feats_names = self.getNodeFeatsName()
+        if "vertices" in feats_names:
+            feats_names.remove("vertices")
+        if "weight" in feats_names:
+            feats_names.remove("weight")
+
+        self.node_normalizers = {}
+        for feature in feats_names:
+            self.node_normalizers[feature] = MinMaxScaler((0, 1))
+
+        for spider_patch in tqdm(self.graphs[fit_indices], position=0, leave=True, desc=f"Normalizer Fitting: ", colour="white", ncols=80):
             for feature in feats_names:
-                node_normalizers[feature] = MinMaxScaler((0, 1))
-
-            for spider_patch in tqdm(self.graphs, position=0, leave=True, desc=f"Normalizer Fitting: ", colour="white", ncols=80):
-                for feature in feats_names:
-                    if spider_patch.node_attr_schemes()[feature].shape == ():
-                        node_normalizers[feature].partial_fit(spider_patch.ndata[feature].reshape((-1, 1)))
-                    else:
-                        node_normalizers[feature].partial_fit(spider_patch.ndata[feature])
-
-        for spider_patch in tqdm(self.graphs, position=0, leave=True, desc=f"Normalizing: ", colour="white", ncols=80):
-            for feature in node_normalizers.keys():
                 if spider_patch.node_attr_schemes()[feature].shape == ():
-                    spider_patch.ndata[feature] = torch.tensor(node_normalizers[feature].transform(spider_patch.ndata[feature].reshape((-1, 1))), dtype=torch.float32)
+                    self.node_normalizers[feature].partial_fit(spider_patch.ndata[feature].reshape((-1, 1)))
                 else:
-                    spider_patch.ndata[feature] = torch.tensor(node_normalizers[feature].transform(spider_patch.ndata[feature]), dtype=torch.float32)
+                    self.node_normalizers[feature].partial_fit(spider_patch.ndata[feature])
 
-        return node_normalizers
+    def normalize(self, indices_to_normalize=None):
+        feats_names = self.getNodeFeatsName()
+        if "vertices" in feats_names:
+            feats_names.remove("vertices")
+        if "weights" in feats_names:
+            feats_names.remove("weights")
 
-    def normalize_edge(self, edge_normalizers=None):
-        """
-        Normalizes edge data of the graphs. The normalization process is applied per feature
-        @param edge_normalizers: (dict) { "feat_name" : sklearn.preprocessing.Scaler}, a dict that map a feature to his normalizer. If None normalizers are calculated at runtime.
-        @return: edge_normalizers: (dict) { "feat_name" : sklearn.preprocessing.Scaler}, a dict that map a feature to his normalizer used in the normalization process.
-        """
-
-        if edge_normalizers is None:
-            edge_normalizers = {}
-            feats_names = self.getEdgeFeatsName()
+        if indices_to_normalize is None:
+            to_normalize = self.graphs
+        else:
+            to_normalize = self.graphs[indices_to_normalize]
+        for spider_patch in tqdm(to_normalize, position=0, leave=True, desc=f"Normalizing: ", colour="white", ncols=80):
             for feature in feats_names:
-                edge_normalizers[feature] = MinMaxScaler((0, 1))
-
-            for spider_patch in tqdm(self.graphs, position=0, leave=True, desc=f"Normalizer Fitting: ", colour="white", ncols=80):
-                for feature in feats_names:
-                    if spider_patch.edge_attr_schemes()[feature].shape == ():
-                        edge_normalizers[feature].partial_fit(spider_patch.edata[feature].reshape((-1, 1)))
-                    else:
-                        edge_normalizers[feature].partial_fit(spider_patch.edata[feature])
-
-        for spider_patch in tqdm(self.graphs, position=0, leave=True, desc=f"Normalizing: ", colour="white", ncols=80):
-            for feature in edge_normalizers.keys():
-                if spider_patch.edge_attr_schemes()[feature].shape == ():
-                    spider_patch.edata[feature] = torch.tensor(edge_normalizers[feature].transform(spider_patch.edata[feature].reshape((-1, 1))), dtype=torch.float32)
+                if spider_patch.node_attr_schemes()[feature].shape == ():
+                    spider_patch.ndata[feature] = torch.tensor(self.node_normalizers[feature].transform(spider_patch.ndata[feature].reshape((-1, 1))), dtype=torch.float32)
                 else:
-                    spider_patch.edata[feature] = torch.tensor(edge_normalizers[feature].transform(spider_patch.edata[feature]), dtype=torch.float32)
+                    spider_patch.ndata[feature] = torch.tensor(self.node_normalizers[feature].transform(spider_patch.ndata[feature]), dtype=torch.float32)
 
-        return edge_normalizers
+    def train_edge_normalizers(self, fit_indices):
+        self.edge_normalizers = {}
+        feats_names = self.getEdgeFeatsName()
+        if "weights" in feats_names:
+            feats_names.remove("weights")
+
+        for feature in feats_names:
+            self.edge_normalizers[feature] = MinMaxScaler((0, 1))
+
+        for spider_patch in tqdm(self.graphs[fit_indices], position=0, leave=True, desc=f"Normalizer Fitting: ", colour="white", ncols=80):
+            for feature in feats_names:
+                if spider_patch.edge_attr_schemes()[feature].shape == ():
+                    self.edge_normalizers[feature].partial_fit(spider_patch.edata[feature].reshape((-1, 1)))
+                else:
+                    self.edge_normalizers[feature].partial_fit(spider_patch.edata[feature])
+
+    def normalize_edges(self, indices_to_normalize=None):
+        feats_names = self.getEdgeFeatsName()
+
+        if "weights" in feats_names:
+            feats_names.remove("weights")
+
+        if indices_to_normalize is None:
+            to_normalize = self.graphs
+        else:
+            to_normalize = self.graphs[indices_to_normalize]
+
+        for spider_patch in tqdm(self.graphs[to_normalize], position=0, leave=True, desc=f"Normalizing: ", colour="white", ncols=80):
+            for feature in self.edge_normalizers.keys():
+                if spider_patch.edge_attr_schemes()[feature].shape == ():
+                    spider_patch.edata[feature] = torch.tensor(self.edge_normalizers[feature].transform(spider_patch.edata[feature].reshape((-1, 1))), dtype=torch.float32)
+                else:
+                    spider_patch.edata[feature] = torch.tensor(self.edge_normalizers[feature].transform(spider_patch.edata[feature]), dtype=torch.float32)
 
     def keepCurvaturesResolution(self, radius_to_keep=None):
         """
@@ -123,27 +148,30 @@ class SpiderPatchDataset(DGLDataset):
                 patch.ndata[feat_name] = patch.ndata[feat_name][:, radius_to_keep]
         return self.graphs[0].ndata["local_depth"].shape
 
-    def aggregateNodeFeatures(self, feat_names=None):
+    def aggregateNodeFeatures(self, to_aggreg_feats=None, aggreg_name="aggregated_feats"):
         """
-        @param feat_names: list of features key to aggregate in a single feature (called aggregate_feature)
+        @param aggreg_name:
+        @param to_aggreg_feats: list of features key to aggregate in a single feature (called aggregate_feature)
         @return: the aggregate feature shape along axis 1 ( if shape 30x4 --> returns 4 )
         """
-        if feat_names is None:
-            feat_names = self.graphs[0]
-            feat_names.remove("vertices")
+        if to_aggreg_feats is None:
+            to_aggreg_feats = self.getNodeFeatsName()
+            to_aggreg_feats.remove("vertices")
 
-        for patch in tqdm(self.graphs, position=0, leave=True, desc=f"Aggregating node features: ", colour="white", ncols=80):
-            patch.ndata["aggregated_feats"] = patch.ndata[feat_names[0]]
-            patch.ndata.pop(feat_names[0])
-            for name in feat_names[1:]:
+        for patch in tqdm(self.graphs, position=0, leave=True, desc=f"Aggregating Nodes: ", colour="white", ncols=80):
+            if patch.node_attr_schemes()[to_aggreg_feats[0]].shape == ():
+                patch.ndata[aggreg_name] = patch.ndata[to_aggreg_feats[0]].view(-1, 1)
+            else:
+                patch.ndata[aggreg_name] = patch.ndata[to_aggreg_feats[0]]
+            patch.ndata.pop(to_aggreg_feats[0])
+            for name in to_aggreg_feats[1:]:
                 if patch.node_attr_schemes()[name].shape == ():
-                    patch.ndata["aggregated_feats"] = torch.hstack((patch.ndata["aggregated_feats"], torch.reshape(patch.ndata[name], (-1, 1))))
-                    patch.ndata.pop(name)
+                    patch.ndata[aggreg_name] = torch.hstack((patch.ndata[aggreg_name], patch.ndata[name].view(-1, 1)))
                 else:
-                    patch.ndata["aggregated_feats"] = torch.hstack((patch.ndata["aggregated_feats"], patch.ndata[name]))
-                    patch.ndata.pop(name)
+                    patch.ndata[aggreg_name] = torch.hstack((patch.ndata[aggreg_name], patch.ndata[name]))
+                patch.ndata.pop(name)
 
-        return self.graphs[0].ndata["aggregated_feats"].shape
+        return self.graphs[0].ndata[aggreg_name].shape
 
     def aggregateEdgeFeatures(self, feat_names="all"):
         """
@@ -184,6 +212,15 @@ class SpiderPatchDataset(DGLDataset):
         if to_delete != []:
             self.graphs = np.delete(self.graphs, to_delete)
             self.labels = np.delete(self.labels, to_delete)
+
+    def removeClasses(self, class_to_remove):
+        for label in class_to_remove:
+            indices = np.where(self.labels == label)[0]
+            self.graphs = np.delete(self.graphs, indices)
+            self.labels = np.delete(self.labels, indices)
+
+        for id, label in enumerate(np.unique(self.labels)):
+            self.labels[self.labels == label] = id
 
     def save_to(self, save_path=None):
         os.makedirs(save_path, exist_ok=True)

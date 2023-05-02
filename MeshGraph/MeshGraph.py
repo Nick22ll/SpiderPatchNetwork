@@ -60,10 +60,11 @@ class MeshGraph(dgl.DGLGraph):
         tmp = np.array(start_nodes)
         start_nodes = np.hstack((start_nodes, end_nodes))
         end_nodes = np.hstack((end_nodes, tmp))
+        nodes = np.unique(np.vstack((start_nodes, end_nodes)), axis=1)  # remove duplicate edges
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
-            super().__init__((start_nodes, end_nodes))
+            super().__init__((nodes[0], nodes[1]))
 
         #  Calculates Edge Weights
         weights = []

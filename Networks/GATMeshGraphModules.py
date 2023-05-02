@@ -25,7 +25,7 @@ class GATMGEmbedder(nn.Module):
             self.GAT_layers.append(GATConv(in_feats=feat_in_channels * feat_dimensions_multipliers[i - 1], out_feats=feat_in_channels, num_heads=feat_dimensions_multipliers[i], feat_drop=dropout, attn_drop=dropout, residual=residual_attn, bias=False))
 
         ####  Activation Functions  ####
-        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.1)
+        self.LeakyReLU = nn.LeakyReLU(negative_slope=0.2)
 
         ####  Normalization Layers  ####
         self.normalizations = nn.ModuleList()

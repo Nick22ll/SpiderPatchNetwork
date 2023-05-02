@@ -1,16 +1,19 @@
-import operator
+import os
+import itertools
 import os
 import pickle
-import seaborn as sns
-import matplotlib
+
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
-import itertools
 import numpy as np
+import seaborn as sns
 import torch
 from dgl.dataloading import GraphDataLoader
 from matplotlib.lines import Line2D
 from sklearn.manifold import TSNE
 from tqdm import tqdm
+import pickle as pkl
+from natsort import os_sorted
 
 
 def plot_confusion_matrix(cm, target_names=None, cmap=None):
@@ -164,7 +167,7 @@ def load_embeddings_statistics(path, id):
 
 
 def plot_embeddings_statistics(paths, id, title="", labels=None):
-    import matplotlib.colors as mcolors
+
 
     embeddings = []
     if labels is None:
@@ -184,7 +187,7 @@ def plot_embeddings_statistics(paths, id, title="", labels=None):
     plt.figure(figsize=(12.8, 7.2), dpi=100)
     ax = plt.subplot(111)
     labels.reverse()
-    cmap = matplotlib.colors.ListedColormap(mcolors.TABLEAU_COLORS.keys())
+    cmap = mcolors.ListedColormap(mcolors.TABLEAU_COLORS.keys())
 
     legend = [0] * embeddings.shape[0]
     for i in range(embeddings.shape[0] - 1, -1, -1):
@@ -289,3 +292,30 @@ def plot_data_distributions(dataset, mask, feature_names=None):
             ax.set(title=f'Distribution of Feature: {feature}', xlabel=None)
         fig.tight_layout()
         plt.show()
+
+
+def plotCVConfusionMatrix(CV_path):
+    # open matrices
+    matrices = []
+    for experiment in os_sorted(os.listdir(CV_path)):
+        with open(f"{CV_path}/{experiment}/MeshNetworkBestAcc/MeshGraphConfusionMatrices.pkl", "rb") as matrices_file:
+            matrices.append(pkl.load(matrices_file))
+
+    sum_matrix = np.zeros_like(matrices[0][0])
+    voting_matrix = np.zeros_like(matrices[0][0])
+    for matrix in matrices:
+        sum_matrix += matrix[1]
+        voting_matrix[matrix[0] > 0.50] += 1
+
+    plot_confusion_matrix(sum_matrix.astype(int))
+
+    sum_matrix /= sum_matrix.astype(np.float).sum(axis=1) * 0.01
+
+    plot_confusion_matrix(sum_matrix)
+
+    voting_matrix /= voting_matrix.astype(np.float).sum(axis=1) * 0.01
+
+    plot_confusion_matrix(voting_matrix)
+
+    print(f"Voting accuracy: {np.trace(voting_matrix) / voting_matrix.shape[0]}")
+    print(f"NO Voting accuracy: {np.trace(sum_matrix) / sum_matrix.shape[0]}")

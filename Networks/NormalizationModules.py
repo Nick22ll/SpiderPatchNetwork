@@ -155,6 +155,7 @@ class UnitedNormBase(nn.Module):
         self.batch_norm = nn.BatchNorm1d(self.num_features, affine=False)
         self.graph_norm = GraphNorm(self.num_features, is_node=is_node, affine=False)
         self.node_norm = nn.LayerNorm(self.num_features, elementwise_affine=False)
+
         if is_node:
             self.adja_norm = AdjaNodeNorm(self.num_features, affine=False)
         else:

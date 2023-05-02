@@ -47,7 +47,7 @@ def CSI(mesh, radius, circle_center, circle_normal, circle_delta, center_face):
             face_normal = mesh.face_normals[face_idx]
             face_delta = np.dot(p1, face_normal)
             try:
-                p = threePlaneIntersection(face_normal, face_delta, circle_normal, circle_delta)  # Mi serve a trovare uin punto qualsiasi appartenente ai due piani (x0,y0,z0) per generare la forma parametrica della retta L(t) (guarda articolo)
+                p = threePlaneIntersection(face_normal, face_delta, circle_normal, circle_delta)  # Mi serve a trovare un punto qualsiasi appartenente ai due piani (x0,y0,z0) per generare la forma parametrica della retta L(t) (guarda articolo)
             except RuntimeWarning:
                 print("Eccezione")
                 continue

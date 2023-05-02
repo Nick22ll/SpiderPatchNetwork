@@ -55,7 +55,7 @@ class SpiderPatch(dgl.DGLGraph):
                                 adjacent_node_id = (current_node + 1) - concentricRings[ring].getElementsNumber()
                             start_nodes = np.hstack((start_nodes, [current_node], [adjacent_node_id]))
                             end_nodes = np.hstack((end_nodes, [adjacent_node_id], [current_node]))
-                            # do all'edge peso pari a 0.75 essendo un edge di collegamento tra due nodi sullo stesso anello
+                            # do all'edge peso pari a 0.85 essendo un edge di collegamento tra due nodi sullo stesso anello
                             edge_weight = 0.85 * pow((1 - WEIGHT_DECAY), ring)
                             edge_weights = np.hstack((edge_weights, np.tile(edge_weight, 2)))  # np.hstack((node_distances, np.tile(np.linalg.norm(next_elem_same_ring - concentricRings[ring][elem]), 2)))
 
@@ -285,7 +285,7 @@ def SP_distanceV1(sp1, sp2, feat_name):
     return np.linalg.norm(dgl.mean_nodes(sp1, feat_name) - dgl.mean_nodes(sp2, feat_name))
 
 
-def SP_matrix_distanceV1(sp1, feat_name):
+def SPMatrixDistanceV1(sp1, feat_name):
     mean_nodes1 = dgl.mean_nodes(sp1, feat_name)
     matrix = torch.cdist(mean_nodes1, mean_nodes1)
     return matrix

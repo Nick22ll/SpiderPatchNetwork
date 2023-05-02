@@ -88,7 +88,8 @@ def main():
         for sample_id in os.listdir(f"{load_path}/{label}"):
             for resolution_level in os.listdir(f"{load_path}/{label}/{sample_id}"):
                 mesh_id = os.listdir(f"{load_path}/{label}/{sample_id}/{resolution_level}")[0]
-                if resolution_level == "resolution_level_0" or resolution_level == "resolution_level_1" or resolution_level == "resolution_level_2" or resolution_level == "resolution_level_3" and int(re.sub(r"\D", "", mesh_id)):  # not in to_exclude
+                # if resolution_level == "resolution_level_0" or resolution_level == "resolution_level_1" or resolution_level == "resolution_level_2" or resolution_level == "resolution_level_3" and int(re.sub(r"\D", "", mesh_id)):  # not in to_exclude
+                if resolution_level == "resolution_level_3":
                     to_extract.append(int(re.sub(r"\D", "", mesh_id)))
                     # with open(f"{load_path}/{label}/{sample_id}/{resolution_level}/{mesh_id}", "rb") as mesh_file:
                     #     mesh = pickle.load(mesh_file)
@@ -101,18 +102,29 @@ def main():
     # parallelGenerateMeshDataset("all", True, "level_2")
 
     # parallelGenerateConcRingDataset(to_extract, configurations=numpy.array([[10, 6, 8], [10,4,6]]), relative_radius=False, normalized=False)
+    # parallelGenerateConcRingDataset(to_extract, configurations=numpy.array([[6, 4, 6], [15,4,6]]), relative_radius=False, normalized=False)
     # parallelGenerateConcRingDataset(to_extract, configurations=numpy.array([[0.1, 4, 6]]), relative_radius=False, normalized=True)
     #
     # generateSPDatasetFromConcRings("Datasets/ConcentricRings/SHREC17_R0.1_R6_P8_CSIRSv2Spiral", valid_rings=2, normalized=True)
+    # generateSPDatasetFromConcRings("Datasets/ConcentricRings/SHREC17_R6_R4_P6_CSIRSv2Spiral", valid_rings=2, normalized=False)
+    # generateSPDatasetFromConcRings("Datasets/ConcentricRings/SHREC17_R15_R4_P6_CSIRSv2Spiral", valid_rings=2, normalized=False)
     # generateSPDatasetFromConcRings("Datasets/ConcentricRings/SHREC17_R0.1_R4_P6_CSIRSv2Spiral", valid_rings=2, normalized=True)
     # generateSPDatasetFromConcRings("Datasets/ConcentricRings/SHREC17_R10_R6_P8_CSIRSv2Spiral", valid_rings=2, normalized=False)
     # generateSPDatasetFromConcRings("Datasets/ConcentricRings/SHREC17_R10_R4_P6_CSIRSv2Spiral", valid_rings=2, normalized=False)
 
-    generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 25, 50, "level_0", 10, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_RES0")
-    generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 25, 50, "level_1", 10, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_RES1")
-    generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 25, 50, "level_2", 10, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_RES2")
-    generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 25, 50, "level_3", 10, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_RES3")
-    generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 25, 50, "all", 10, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_ALLRES")
+    generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R6_R4_P6_CSIRSv2Spiral", 6, 35, "all", 5, None, "SHREC17_R6_R4_P6_CSIRSv2Spiral_MGRAPHS6_SPIDER35_CONN5_RESALL")
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R15_R4_P6_CSIRSv2Spiral", 25, 50, "level_3", 5, None, "SHREC17_R15_R4_P6_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN5_RES3")
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 1, 25, "level_3", 10, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS1_SPIDER25_CONN10_RES3")
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 25, 50, "level_3", 10, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_RES3")
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R0.1_R6_P8_CSIRSv2Spiral", 25, 50, "level_3", 5, None, "SHREC17_R0.1_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN5_RES3")
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R0.1_R6_P8_CSIRSv2Spiral", 25, 50, "level_3", 10, None, "SHREC17_R0.1_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_RES3")
+
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 25, 50, "level_0", 10, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_RES0")
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 25, 50, "level_1", 10, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_RES1")
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 25, 50, "level_2", 10, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_RES2")
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 25, 50, "level_3", 10, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_RES3")
+
+    # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R6_P8_CSIRSv2Spiral", 25, 50, "all", 10, None, "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_ALLRES")
 
     # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R4_P6_CSIRSv2Spiral", 25, 50, "level_0", 5, None, "SHREC17_R10_R4_P6_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN5_RES0")
     # generateMeshGraphDatasetFromPatches("Datasets/SpiderPatches/SHREC17_R10_R4_P6_CSIRSv2Spiral", 25, 50, "level_1", 5, None, "SHREC17_R10_R4_P6_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN5_RES1")

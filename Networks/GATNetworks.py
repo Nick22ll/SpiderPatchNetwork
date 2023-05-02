@@ -12,7 +12,7 @@ from Networks.CONVMeshGraphModules import CONVMGEmbedder
 from Networks.GATSpiderPatchModules import GATSPEmbedder
 
 from Networks.MLP import MLP
-from SpiderPatch.SpiderPatch import SP_matrix_distanceV1
+from SpiderPatch.SpiderPatch import SPMatrixDistanceV1
 
 
 class SimplestNetwork(nn.Module):
@@ -97,7 +97,7 @@ class TestNetwork(nn.Module):
             negative_embeddings = torch.empty((len(batched_patches), self.patch_embedder.embed_dim), dtype=torch.long, device=device)
 
             for idx, SP_batch in enumerate(dataloader):
-                batch_distance_matrix = SP_matrix_distanceV1(SP_batch, "aggregated_feats")
+                batch_distance_matrix = SPMatrixDistanceV1(SP_batch, "aggregated_feats")
                 _, sorted_indices = torch.sort(batch_distance_matrix, dim=1)
                 negative_SP_idx = sorted_indices[:, -5:]
                 positive_SP_idx = sorted_indices[:, 1:6]  # select from 1 to 6 to avoid to keep the same SP
@@ -156,7 +156,7 @@ class TestNetwork(nn.Module):
 #             negative_embeddings = torch.empty((len(batched_patches), self.patch_embedder.embed_dim), dtype=torch.long, device=device)
 #
 #             for idx, SP_batch in enumerate(dataloader):
-#                 batch_distance_matrix = SP_matrix_distanceV1(SP_batch, "aggregated_feats")
+#                 batch_distance_matrix = SPMatrixDistanceV1(SP_batch, "aggregated_feats")
 #                 _, sorted_indices = torch.sort(batch_distance_matrix, dim=1)
 #                 negative_SP_idx = sorted_indices[:, -5:]
 #                 positive_SP_idx = sorted_indices[:, 1:6]  # select from 1 to 6 to avoid to keep the same SP
