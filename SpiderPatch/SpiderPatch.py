@@ -89,7 +89,7 @@ class SpiderPatch(dgl.DGLGraph):
         # node_features["f_normal"] = mesh.face_normals[mesh_face_idx]
 
         if not mesh.has_curvatures():
-            raise RuntimeError("Mesh  doesn't have computed curvatures!")
+            raise RuntimeError("Mesh doesn't have computed curvatures!")
         for curvature in ["gauss_curvature", "mean_curvature", "curvedness", "K2", "local_depth"]:
             node_features[curvature] = mesh.face_curvatures[0][curvature][mesh_face_idx].reshape((-1, 1))
             for radius_level in range(1, 5):

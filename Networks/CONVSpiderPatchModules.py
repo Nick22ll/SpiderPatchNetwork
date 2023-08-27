@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 from Networks.GATSpiderPatchModules import GATNodeWeigher
 from Networks.NormalizationModules import UnitedNormCommon
+from Networks.SpiralReadout import SpiralReadout
 from Networks.UniversalReadout import UniversalReadout
 
 
@@ -48,31 +49,34 @@ class CONVSPEmbedder(nn.Module):
         #### Readout Layers  ####
         if readout_function == "UR":
             self.readouts = nn.ModuleList()
-            self.readouts.append(UniversalReadout(feat_in_dim))
-            for i in range(1, layers_num):
+            for _ in range(layers_num):
                 self.readouts.append(UniversalReadout(feat_in_dim))
         elif readout_function == "AR":
             self.readouts = []
             for i in range(layers_num):
                 self.readouts.append(dgl.mean_nodes)
+        elif readout_function == "SR":
+            self.readouts = nn.ModuleList()
+            for _ in range(layers_num):
+                self.readouts.append(SpiralReadout(feat_in_dim * kwargs["sp_nodes"]))
         else:
             raise "Unknown Readout Function"
 
         ####   JumpKnowledge Modules  ####
         if self.JUMPING_MODE == "lstm" or self.JUMPING_MODE == "max":
-            if readout_function == "UR":
+            if readout_function == "UR" or readout_function == "SR":
                 self.embed_dim = self.readouts[0].readout_dim
             else:
                 self.embed_dim = feat_in_dim
             self.jumping = JumpingKnowledge(mode=self.JUMPING_MODE, in_feats=self.embed_dim, num_layers=layers_num)
         elif self.JUMPING_MODE == "cat":
             self.jumping = JumpingKnowledge(mode=self.JUMPING_MODE)
-            if readout_function == "UR":
+            if readout_function == "UR" or readout_function == "SR":
                 self.embed_dim = sum(r.readout_dim for r in self.readout_list)
             else:
-                self.embed_dim = feat_in_dim + sum([feat_in_dim for i in range(1, layers_num)])
+                self.embed_dim = sum([feat_in_dim for _ in range(layers_num)])
         elif self.JUMPING_MODE is None:
-            if readout_function == "UR":
+            if readout_function == "UR" or readout_function == "SR":
                 self.embed_dim = self.readout_list[0].readout_dim
             else:
                 self.embed_dim = feat_in_dim
@@ -114,44 +118,6 @@ class CONVSPEmbedder(nn.Module):
         return bests
 
 
-class SPReader(nn.Module):
-    def __init__(self, feat_in_dim, readout_function="AR", weigher_mode=None, weights_in_dim=0, *args, **kwargs):
-        super(SPReader, self).__init__()
-
-        ####  Readouts Utils  ####
-        self.weigher_mode = weigher_mode
-
-        if self.weigher_mode is not None:
-            if self.weigher_mode == "sp_weights":
-                self.weigher = nn.Identity()
-            elif self.weigher_mode == "attn_weights":
-                self.weigher = GATNodeWeigher(feat_in_dim, weights_in_dim, False)
-            elif self.weigher_mode == "attn_weights+feats":
-                self.weigher = GATNodeWeigher(feat_in_dim, weights_in_dim, True)
-            else:
-                raise "Wrong Weigher Mode"
-
-        #### Readout Layers  ####
-        if readout_function == "UR":
-            self.readout = UniversalReadout(feat_in_dim)
-            self.embed_dim = self.readout.readout_dim
-        elif readout_function == "AR":
-            self.readout = dgl.mean_nodes
-            self.embed_dim = feat_in_dim
-        else:
-            raise "Unknown Readout Function"
-
-    def forward(self, spider_patch, node_feats):
-
-        spider_patch.ndata['updated_feats'] = node_feats
-
-        if self.weigher_mode is not None:
-            spider_patch.ndata['node_weights'] = self.weigher(spider_patch, "aggregated_weights", "updated_feats")
-            weights_name = 'node_weights'
-        else:
-            weights_name = None
-
-        return self.readout(spider_patch, 'updated_feats', weights_name)
 
 
 class JumpResSPEmbedder(nn.Module):

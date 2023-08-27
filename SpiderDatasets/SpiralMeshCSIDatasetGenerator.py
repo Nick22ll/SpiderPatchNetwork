@@ -11,7 +11,7 @@ from sklearn.metrics import pairwise_distances
 from tqdm import tqdm
 
 from MeshGraph.SpiralMeshCSI import SpiralMeshCSI
-from SHREC_Utils import subdivide_for_mesh
+from SHREC_Utils import readPermSHREC17
 from CSIRS.CSIRS import CSIRSv2Spiral
 
 
@@ -32,7 +32,7 @@ def generateSpiralMeshCSIDataset(to_extract="all"):
     resolution_level = "level_0"
     graph_for_mesh = 30
     connection_number = 0
-    meshes = subdivide_for_mesh(return_type="list")
+    meshes = readPermSHREC17(return_type="list")
     save_path = f"Datasets/SpiralMeshCSI/SHREC17_R{radius}_RI{rings}_P{points}_NR{node_radius}_NRI{node_rings}_NP{node_points}"
 
     # Iterate over meshes of the mesh dataset
@@ -123,7 +123,7 @@ def generateSpiralMeshCSIDataset(to_extract="all"):
 
 def parallelGenerateSpiralMeshCSIDataset(to_extract=None):
     if to_extract is None:
-        to_extract = subdivide_for_mesh(return_type="list")
+        to_extract = readPermSHREC17(return_type="list")
     thread_num = 8
     pool = multiprocessing.Pool(processes=thread_num)
     mesh_for_thread = int(len(to_extract) / thread_num)

@@ -64,7 +64,7 @@ class GATMGEmbedder(nn.Module):
                 self.embed_dim = feat_in_channels
 
         ####  Dropout  ####
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = dropout
 
     def forward(self, mesh_graph, node_feats):
         updated_feats = node_feats
@@ -73,9 +73,8 @@ class GATMGEmbedder(nn.Module):
             updated_feats = gat_layer(mesh_graph, updated_feats).flatten(1)
             updated_feats = self.normalizations[idx](mesh_graph, updated_feats)
             updated_feats = self.LeakyReLU(updated_feats)
-            updated_feats = self.dropout(updated_feats)
             mesh_graph.ndata['updated_feats'] = torch.unflatten(updated_feats, -1, (gat_layer._num_heads, -1)).mean(1)
-            embeddings.append(self.readout_list[idx](mesh_graph, 'updated_feats'))
+            embeddings.append(torch.nn.functional.dropout(self.readout_list[idx](mesh_graph, 'updated_feats'), torch.rand(1).item() * self.dropout, training=self.training))
 
         if self.JUMPING_MODE is None:
             return self.LeakyReLU(embeddings[-1])

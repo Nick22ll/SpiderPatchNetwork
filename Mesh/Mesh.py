@@ -1,9 +1,11 @@
 import copy
 import pickle
 
+import networkx as nx
 import open3d as o3d
 import numpy as np
 import trimesh
+from pygeodesic import geodesic
 from trimesh import caching, Trimesh
 from Mesh.MeshCurvatures import *
 import matplotlib.cm as cm
@@ -149,6 +151,84 @@ class Mesh:
         else:
             o3d.visualization.draw_geometries([mesh], mesh_show_back_face=True)
 
+    def drawWithGeodesicPath(self, path):
+
+        vertices = o3d.utility.Vector3dVector(self.vertices)
+        faces = o3d.utility.Vector3iVector(self.faces)
+        mesh = o3d.geometry.TriangleMesh(vertices, faces)
+        mesh.compute_triangle_normals()
+        mesh.compute_vertex_normals()
+
+        lines = o3d.utility.Vector2iVector([[i, i + 1] for i in range(len(path) - 1)])
+
+        line_set = o3d.geometry.LineSet()
+        line_set.points = o3d.utility.Vector3dVector(path)
+        line_set.lines = lines
+
+        mat = o3d.visualization.rendering.MaterialRecord()
+        mat.shader = "unlitLine"
+        mat.line_width = 5
+
+        o3d.visualization.draw([{
+            "name": "lines",
+            "geometry": line_set,
+            "material": mat
+        }, {
+            "name": "mesh",
+            "geometry": mesh,
+        }])
+
+    def drawWithGeodesicMeshGraph(self, mesh_graph):
+        vertices = o3d.utility.Vector3dVector(self.vertices)
+        faces = o3d.utility.Vector3iVector(self.faces)
+        mesh = o3d.geometry.TriangleMesh(vertices, faces)
+        mesh.compute_triangle_normals()
+        mesh.compute_vertex_normals()
+
+        cmap = cm.get_cmap('gist_rainbow')
+
+        start, end = mesh_graph.edges()
+
+        geodesic_paths_indx = []
+        seeds_coordinates = []
+
+        for i, s in enumerate(start):
+            geodesic_paths_indx.append([np.where(np.all(self.vertices == mesh_graph.patches[s].seed_point, axis=1))[0], np.where(np.all(self.vertices == mesh_graph.patches[end[i]].seed_point, axis=1))[0]])
+            seeds_coordinates.append([mesh_graph.patches[s].seed_point, mesh_graph.patches[end[i]].seed_point])
+
+        for_draw_patches = []
+
+        for i, patch in enumerate(mesh_graph.patches):
+            for_draw_patches.extend(patch.to_draw(color=cmap(1 / (i + 1))[:-1]))
+
+        geoalg = geodesic.PyGeodesicAlgorithmExact(self.vertices, self.faces)
+        geodesic_paths = []
+        for start, end in geodesic_paths_indx:
+            _, path = geoalg.geodesicDistance(start, end)
+            geodesic_paths.append(o3d.geometry.LineSet())
+            geodesic_paths[-1].points = o3d.utility.Vector3dVector(path)
+            geodesic_paths[-1].lines = o3d.utility.Vector2iVector([[i, i + 1] for i in range(len(path) - 1)])
+
+        mat = o3d.visualization.rendering.MaterialRecord()
+        mat.shader = "unlitLine"
+        mat.line_width = 5
+
+        lista = [{
+            "name": f"lines_{i}",
+            "geometry": line_set,
+            "material": mat
+        } for i, line_set in enumerate(geodesic_paths)] + [{
+            "name": "mesh",
+            "geometry": mesh,
+        }] + [
+                    {
+                        "name": f"spider_patches_{i}",
+                        "geometry": spider_patch,
+                    } for i, spider_patch in enumerate(for_draw_patches)
+                ]
+
+        o3d.visualization.draw(lista)
+
     def drawWithConcRings(self, concRing, lrf=False):
         vertices = o3d.utility.Vector3dVector(self.vertices)
         faces = o3d.utility.Vector3iVector(self.faces)
@@ -156,7 +236,7 @@ class Mesh:
         mesh.compute_triangle_normals()
         mesh.compute_vertex_normals()
 
-        # mesh.translate(-0.5 * np.mean(mesh.vertex_normals, axis=0))
+        mesh.translate(-0.5 * np.mean(mesh.vertex_normals, axis=0))
 
         points = concRing.seed_point.reshape((1, 3))
         faces = concRing.seed_point_face
@@ -291,7 +371,7 @@ class Mesh:
         mesh.compute_triangle_normals()
         mesh.compute_vertex_normals()
 
-        mesh.translate(-2 * np.mean(mesh.vertex_normals, axis=0))
+        # mesh.translate(-2 * np.mean(mesh.vertex_normals, axis=0))
 
         for_draw_patches = []
 
@@ -423,13 +503,22 @@ class Mesh:
         mesh.vertex_colors = o3d.utility.Vector3dVector(rgbs)
         o3d.visualization.draw_geometries([mesh], mesh_show_back_face=True)
 
-    def loadFromMeshFile(self, mesh_path, normalize=False):
+    def loadFromMeshFile(self, mesh_path, normalize=False, perturbe=(0, 1)):
         """
         Load a mesh. Format available: .inp), ANSYS msh (.msh), AVS-UCD (.avs), CGNS (.cgns), DOLFIN XML (.xml), Exodus (.e, .exo), FLAC3D (.f3grid), H5M (.h5m), Kratos/MDPA (.mdpa), Medit (.mesh, .meshb), MED/Salome (.med), Nastran (bulk data, .bdf, .fem, .nas), Netgen (.vol, .vol.gz), Neuroglancer precomputed format, Gmsh (format versions 2.2, 4.0, and 4.1, .msh), OBJ (.obj), OFF (.off), PERMAS (.post, .post.gz, .dato, .dato.gz), PLY (.ply), STL (.stl), Tecplot .dat, TetGen .node/.ele, SVG (2D output only) (.svg), SU2 (.su2), UGRID (.ugrid), VTK (.vtk), VTU (.vtu), WKT (TIN) (.wkt), XDMF (.xdmf, .xmf).
         @param mesh_path: the path of the mesh to load
         @return: None
         """
         mesh = o3d.io.read_triangle_mesh(mesh_path)
+        if len(mesh.vertices) == 0:
+            raise Exception("Empty Mesh or Wrong Path!")
+        if perturbe[0] > 0:
+            pc = np.asarray(mesh.vertices)
+            pc += ((np.random.rand(len(pc), 1) < perturbe[0]) * (np.random.rand(len(pc), 3) * perturbe[1]))
+            pc = o3d.utility.Vector3dVector(pc)
+            faces = o3d.utility.Vector3iVector(mesh.triangles)
+            mesh = o3d.geometry.TriangleMesh(pc, faces)
+
         if normalize:
             pc = np.asarray(mesh.vertices)
             centroid = np.mean(pc, axis=0)
@@ -459,6 +548,30 @@ class Mesh:
 
     def has_edges(self):
         return self.edges is not None
+
+    def to_networkX(self):
+        edge_lengths = np.linalg.norm(self.vertices[self.edges[:, 0]] - self.vertices[self.edges[:, 1]], axis=1)
+        g = nx.Graph()
+        for edge, L in zip(self.edges, edge_lengths):
+            g.add_edge(*edge, length=L)
+        self.networkX_graph = g
+        return g
+
+    def geodesicApproximation(self, start_vertices, stop_vertices):
+        if self.networkX_graph != None:
+            self.to_networkX()
+
+        paths_lengths = []
+
+        paths = []
+        for i, start_vertex in enumerate(start_vertices):
+            paths.append([])
+            paths_lengths.append([])
+            all_paths_lengths, all_paths = nx.multi_source_dijkstra(self.networkX_graph, [start_vertex], weight='length')
+            for j, stop_vertex in enumerate(stop_vertices):
+                paths[i].append(all_paths[stop_vertex])
+                paths_lengths[i].append(all_paths_lengths[stop_vertex])
+        return paths_lengths, paths
 
 
 def expandFacet(facet, mesh):

@@ -6,6 +6,7 @@ from dgl.nn.pytorch import GATConv, JumpingKnowledge
 from tqdm import tqdm
 
 from Networks.NormalizationModules import UnitedNormCommon
+from Networks.SpiralReadout import SpiralReadout
 from Networks.UniversalReadout import UniversalReadout
 
 
@@ -33,7 +34,7 @@ class GATNodeWeigher(nn.Module):
 
 
 class GATWeightedSP(nn.Module):
-    def __init__(self, feat_in_dim, readout_function="AR", weigher_mode=None, weights_in_dim=0, dropout=0, *args):
+    def __init__(self, feat_in_dim, readout_function="AR", weigher_mode=None, weights_in_dim=0, dropout=0, *args, **kwargs):
         super(GATWeightedSP, self).__init__()
 
         ####  Readouts Utils  ####
@@ -52,6 +53,9 @@ class GATWeightedSP(nn.Module):
         ####  Readout  ####
         if readout_function == "UR":
             self.readout = UniversalReadout(feat_in_dim)
+            self.embed_dim = self.readout.readout_dim
+        elif readout_function == "SR":
+            self.readout = SpiralReadout(feat_in_dim * kwargs["sp_nodes"])
             self.embed_dim = self.readout.readout_dim
         elif readout_function == "AR":
             self.readouts = dgl.mean_nodes
@@ -74,7 +78,7 @@ class GATWeightedSP(nn.Module):
 
 
 class GATSPEmbedder(nn.Module):
-    def __init__(self, feat_in_dim, readout_function="AR", jumping_mode="lstm", layers_num=3, residual_attn=True, exp_heads=False, weigher_mode=None, weights_in_dim=0, dropout=0):
+    def __init__(self, feat_in_dim, readout_function="AR", jumping_mode="lstm", layers_num=3, residual_attn=True, exp_heads=False, weigher_mode=None, weights_in_dim=0, dropout=0, *args, **kwargs):
         super(GATSPEmbedder, self).__init__()
         exp_heads = 1 if exp_heads else 0
         feat_dimensions_multipliers = [(2 ** (i * exp_heads + 1)) for i in range(layers_num)]
@@ -113,37 +117,40 @@ class GATSPEmbedder(nn.Module):
         #### Readout Layers  ####
         if readout_function == "UR":
             self.readouts = nn.ModuleList()
-            self.readouts.append(UniversalReadout(feat_in_dim))
-            for i in range(1, layers_num):
+            for _ in range(layers_num):
                 self.readouts.append(UniversalReadout(feat_in_dim))
         elif readout_function == "AR":
             self.readouts = []
             for i in range(layers_num):
                 self.readouts.append(dgl.mean_nodes)
+        elif readout_function == "SR":
+            self.readouts = nn.ModuleList()
+            for _ in range(layers_num):
+                self.readouts.append(SpiralReadout(feat_in_dim * kwargs["sp_nodes"]))
         else:
             raise "Unknown Readout Function"
 
         ####   JumpKnowledge Modules  ####
         if self.JUMPING_MODE == "lstm" or self.JUMPING_MODE == "max":
-            if readout_function == "UR":
+            if readout_function == "UR" or readout_function == "SR":
                 self.embed_dim = self.readouts[0].readout_dim
             else:
                 self.embed_dim = feat_in_dim
             self.jumping = JumpingKnowledge(mode=self.JUMPING_MODE, in_feats=self.embed_dim, num_layers=layers_num)
         elif self.JUMPING_MODE == "cat":
             self.jumping = JumpingKnowledge(mode=self.JUMPING_MODE)
-            if readout_function == "UR":
+            if readout_function == "UR" or readout_function == "SR":
                 self.embed_dim = sum(r.readout_dim for r in self.readouts)
             else:
                 self.embed_dim = feat_in_dim + sum([feat_in_dim for i in range(1, layers_num)])
         elif self.JUMPING_MODE is None:
-            if readout_function == "UR":
+            if readout_function == "UR" or readout_function == "SR":
                 self.embed_dim = self.readout_list[0].readout_dim
             else:
                 self.embed_dim = feat_in_dim
 
         ####  Dropout  ####
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = dropout
 
     def forward(self, spider_patch, node_feats):
         updated_feats = node_feats
@@ -152,14 +159,13 @@ class GATSPEmbedder(nn.Module):
             updated_feats = gat_layer(spider_patch, updated_feats).flatten(1)
             updated_feats = self.normalizations[idx](spider_patch, updated_feats)
             updated_feats = self.LeakyReLU(updated_feats)
-            updated_feats = self.dropout(updated_feats)
             spider_patch.ndata['updated_feats'] = torch.unflatten(updated_feats, -1, (gat_layer._num_heads, -1)).mean(1)
             if self.weigher_mode is not None:
                 spider_patch.ndata['node_weights'] = self.weighers[idx](spider_patch, "aggregated_weights", "updated_feats")
                 weights_name = 'node_weights'
             else:
                 weights_name = None
-            embeddings.append(self.readouts[idx](spider_patch, 'updated_feats', weights_name))
+            embeddings.append(torch.nn.functional.dropout(self.readouts[idx](spider_patch, 'updated_feats', weights_name), torch.rand(1).item() * self.dropout, training=self.training))
         return self.LeakyReLU(self.jumping(embeddings))
 
     def extractBestNormLayers(self):

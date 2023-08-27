@@ -26,7 +26,8 @@ def CSIRS(mesh, seed_point, radius, n_rings, n_points):
     circle_normals = generateCircleNormals(mesh.vertex_normals[seed_point], int(n_points / 2))  # Only pair n_points
     circle_deltas = np.sum(circle_centers * circle_normals, axis=1)  # Substitute of circle_deltas = np.dot(circle_centers, circle_normals)
 
-    rings = ConcentricRings()
+    seed_face_idx = mesh.vertex_faces[seed_point][0]
+    rings = ConcentricRings(mesh.vertices[seed_point], seed_face_idx)
     intersecting_points = np.zeros((n_points, 3))
     intersecting_faces = - np.ones(n_points, dtype=int)
     candidates_v, candidates_faces = [], []

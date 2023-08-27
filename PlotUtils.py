@@ -1,4 +1,4 @@
-import os
+
 import itertools
 import os
 import pickle
@@ -16,9 +16,11 @@ import pickle as pkl
 from natsort import os_sorted
 
 
-def plot_confusion_matrix(cm, target_names=None, cmap=None):
-    if cmap is None:
+def plot_confusion_matrix(cm, target_names=None, cmap_name=None):
+    if cmap_name is None:
         cmap = plt.get_cmap('Blues')
+    else:
+        cmap = plt.get_cmap(cmap_name)
 
     plt.figure(figsize=(10, 8))
     plt.imshow(cm, interpolation='nearest', cmap=cmap)
@@ -294,7 +296,7 @@ def plot_data_distributions(dataset, mask, feature_names=None):
         plt.show()
 
 
-def plotCVConfusionMatrix(CV_path):
+def plotCVConfusionMatrix(CV_path, cmap_name=None):
     # open matrices
     matrices = []
     for experiment in os_sorted(os.listdir(CV_path)):
@@ -307,15 +309,15 @@ def plotCVConfusionMatrix(CV_path):
         sum_matrix += matrix[1]
         voting_matrix[matrix[0] > 0.50] += 1
 
-    plot_confusion_matrix(sum_matrix.astype(int))
+    plot_confusion_matrix(sum_matrix.astype(int), cmap_name=cmap_name)
 
     sum_matrix /= sum_matrix.astype(np.float).sum(axis=1) * 0.01
 
-    plot_confusion_matrix(sum_matrix)
+    plot_confusion_matrix(sum_matrix, cmap_name=cmap_name)
 
     voting_matrix /= voting_matrix.astype(np.float).sum(axis=1) * 0.01
 
-    plot_confusion_matrix(voting_matrix)
+    plot_confusion_matrix(voting_matrix, cmap_name=cmap_name)
 
     print(f"Voting accuracy: {np.trace(voting_matrix) / voting_matrix.shape[0]}")
     print(f"NO Voting accuracy: {np.trace(sum_matrix) / sum_matrix.shape[0]}")

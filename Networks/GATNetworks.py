@@ -6,11 +6,7 @@ import torch
 import torch.nn as nn
 from dgl.dataloading import GraphDataLoader
 
-from Networks.CONVSpiderPatchModules import CONVSPEmbedder
-from Networks.GATMeshGraphModules import GATMGEmbedder
-from Networks.CONVMeshGraphModules import CONVMGEmbedder
 from Networks.GATSpiderPatchModules import GATSPEmbedder
-
 from Networks.MLP import MLP
 from SpiderPatch.SpiderPatch import SPMatrixDistanceV1
 
@@ -54,7 +50,7 @@ class SimplestNetwork(nn.Module):
 
 
 class TestNetwork(nn.Module):
-    def __init__(self, feat_in_channels, weights_in_channels, out_feats, network_parameters, use_SP_triplet=False):
+    def __init__(self, feat_in_channels, weights_in_channels, out_feats, network_parameters, use_SP_triplet=False, sp_nodes=0):
         super(TestNetwork, self).__init__()
 
         ####  Variables  ####
@@ -73,7 +69,8 @@ class TestNetwork(nn.Module):
                                                                  weights_in_dim=weights_in_channels,
                                                                  dropout=network_parameters["SP"]["dropout"],
                                                                  residual_attn=network_parameters["SP"]["residual"],
-                                                                 exp_heads=network_parameters["SP"]["exp_heads"]
+                                                                 exp_heads=network_parameters["SP"]["exp_heads"],
+                                                                 sp_nodes=sp_nodes
                                                                  )
 
         self.mesh_embedder = network_parameters["MG"]["module"](feat_in_channels=self.patch_embedder.embed_dim,
@@ -85,7 +82,7 @@ class TestNetwork(nn.Module):
                                                                 dropout=network_parameters["MG"]["dropout"])
 
         self.classifier = nn.Linear(in_features=self.mesh_embedder.embed_dim, out_features=out_feats, bias=False)
-        # self.classifier = MLP(in_dim=self.mesh_embedder.embed_dim, hidden_dim=int(self.mesh_embedder.embed_dim / 2), out_dim=out_feats)
+        # self.classifier = MLP(in_dim=self.mesh_embedder.embed_dim, hidden_dim=int(self.mesh_embedder.embed_dim / 2), out_dim=out_feats, dropout=0.1)
 
     def forward(self, mesh_graph, batched_patches, device):
         BATCH_SIZE = self.BATCH_SIZE if len(batched_patches) >= self.BATCH_SIZE else len(batched_patches)

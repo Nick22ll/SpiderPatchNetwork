@@ -1,28 +1,27 @@
+import inspect
 import os
 import pickle
 import re
 import shutil
 import sys
-import warnings
 from datetime import datetime
-from time import time
-import inspect
+from time import time, perf_counter
+
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn.functional as F
 from dgl.dataloading import GraphDataLoader
-from scipy.special import softmax
 from sklearn import metrics
-from torch import nn
+from sklearn.metrics import roc_auc_score
+from torch.optim.lr_scheduler import CosineAnnealingLR, CosineAnnealingWarmRestarts
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from Networks.CONVMeshGraphModules import CONVMGEmbedder
-from Networks.CONVSpiderPatchModules import CONVSPEmbedder
 from Networks.GATMeshGraphModules import GATMGEmbedder
 from Networks.GATNetworks import TestNetwork
 from Networks.GATSpiderPatchModules import GATSPEmbedder
 from Networks.Losses import CETripletMG, TripletMGSP, TripletMG
+from Networks.SpiderPatchReaders import SPReader
 from PlotUtils import save_confusion_matrix, plot_training_statistics, plot_grad_flow
 from SpiderDatasets.MeshGraphDataset import MeshGraphDataset
 from Utils import AverageMeter, ProgressMeter, accuracy
@@ -32,10 +31,8 @@ def main():
     os.chdir(os.path.dirname(sys.argv[0]))
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     for name in [
-        # "SHREC17_R6_R4_P6_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN5_RES3",
-        # "SHREC17_R0.1_R4_P6_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN5_RES3",
-        # "SHREC17_R10_R4_P6_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN5_RES3",
-        "SHREC17_R10_R4_P6_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN5_RESALL"
+        "SHREC17_R10_R6_P8_CSIRSv2Spiral_MGRAPHS25_SPIDER50_CONN10_RES3"
+        # "SHREC20_R0.1_R6_P8_CSIRSv2Spiral_MGRAPHS5_SPIDER20_CONN5"
     ]:
 
         dataset_name = name
@@ -61,6 +58,8 @@ def main():
         dataset = MeshGraphDataset(dataset_name=dataset_name)
         dataset.load_from(f"../Datasets/MeshGraphs", dataset_name)
 
+        np.save("samples2", np.unique(dataset.sample_id[dataset.getTrainTestMask()]))
+
         sp_radius = re.search('_R(.*?)_', dataset_name).group(1)
         rings = int(re.search('_R(\d)_P', dataset_name).group(1))
         points = int(re.search('_P(\d)_C', dataset_name).group(1))
@@ -70,99 +69,101 @@ def main():
         experiment_dict["SP_points"] = [points]
         experiment_dict["dataset_MG_num"] = [int(re.search('MGRAPHS(\d*)_', dataset_name).group(1))]
         experiment_dict["SP_per_MG"] = [int(re.search('_SPIDER(\d*)_', dataset_name).group(1))]
-        experiment_dict["MG_connectivity"] = [int(re.search('_CONN(\d*)_', dataset_name).group(1))]
+        conn = re.search('_CONN(\d*)_', dataset_name)
+        if not conn:
+            conn = re.search('_CONN(\d*)', dataset_name)
+        experiment_dict["MG_connectivity"] = [int(conn.group(1) if conn else -1)]
 
-        experiment_dict["mesh_resolution"] = [re.search('_RES(\d*)', dataset_name).group(1)]
+        res = re.search('_RES(\d*)', dataset_name)
+        experiment_dict["mesh_resolution"] = [int(res.group(1) if res else -1)]
         experiment_dict["dataset_name"] = [dataset_name]
 
-        print(dataset.graphs[0].patches[0].node_attr_schemes())
+        # print(dataset.graphs[0].patches[0].node_attr_schemes())
         # dataset.removeClasses([5, 10, 11, 12, 13])
         # dataset.removeSpiderPatchByNumNodes((rings * points) + 1)
         dataset.keepCurvaturesResolution(radius_to_keep)
-        # dataset.aggregateSpiderPatchesNodeFeatures(["vertices"])
         dataset.aggregateSpiderPatchesNodeFeatures(features[features_to_keep], "aggregated_feats")
         dataset.aggregateSpiderPatchesNodeFeatures(["weights", "rings", "points"], "aggregated_weights")
         dataset.aggregateSpiderPatchEdgeFeatures()
         dataset.removeNonAggregatedFeatures()
 
-        train_mask, test_mask = dataset.getTrainTestMask(10, percentage=False)
-        # cross_validation_mask = dataset.getCrossValidationMask()
+        # train_mask, test_mask = dataset.getTrainTestMask(18, percentage=False)
+        cross_validation_mask = dataset.getSHREC20CrossValidationMask()
 
-        # for fold, masks in cross_validation_mask.items():
-        #
-        #     if fold in [0,1,2,3,4,5,6,7,10,11]:
-        #         continue
-        #
-        #     train_mask = masks["train_indices"]
-        #     test_mask = masks["test_indices"]
+        for fold, masks in cross_validation_mask.items():
 
-        class_num = len(np.unique(dataset.labels[train_mask]))
+            if fold in [0, 1]:
+                continue
 
-        mode = "normalization"  # ["standardization", "normalization", "robust", "quantile"]
-        elim_mode = None  # ["standard", "quantile", None]
+            train_mask = masks["train_indices"]
+            test_mask = masks["test_indices"]
 
-        experiment_dict["normalization_mode"] = mode
-        experiment_dict["normalization_elim_mode"] = elim_mode if elim_mode is not None else "None"
+            class_num = len(np.unique(dataset.labels[train_mask]))
 
-        dataset.normalizeV2(train_mask, mode, elim_mode)
-        # dataset.normalize_edge(train_mask)
-        # plot_data_distributions(dataset, train_mask)
+            mode = "normalization"  # ["standardization", "normalization", "robust", "quantile"]
+            elim_mode = None  # ["standard", "quantile", None]
 
-        print(dataset.graphs[0].patches[0].node_attr_schemes())
+            experiment_dict["normalization_mode"] = mode
+            experiment_dict["normalization_elim_mode"] = elim_mode if elim_mode is not None else "None"
 
-        feat_in_channels = dataset.graphs[0].patches[0].ndata["aggregated_feats"].shape[1]
-        weights_in_channels = dataset.graphs[0].patches[0].ndata["aggregated_weights"].shape[1]
-        epochs = 30
+            dataset.normalizeV2(train_mask, mode, elim_mode)
+            #
+            # dataset.normalize_edge(train_mask)
+            # plot_data_distributions(dataset, train_mask)
 
-        network_parameters = {}
+            print(dataset.graphs[0].patches[0].node_attr_schemes())
 
-        ####  SPIDER PATCH PARAMETERS  ####
-        network_parameters["SP"] = {}
-        network_parameters["SP"]["module"] = GATSPEmbedder  # [ CONVSPEmbedder, GATSPEmbedder , GATWeightedSP, SPReader]
-        network_parameters["SP"]["readout_function"] = "AR"  # [ "AR" , "UR" ]
-        network_parameters["SP"]["jumping_mode"] = "cat"  # [ None, "lstm", "max", "cat"]
-        network_parameters["SP"]["layers_num"] = 6
-        network_parameters["SP"]["dropout"] = 0
+            feat_in_channels = dataset.graphs[0].patches[0].ndata["aggregated_feats"].shape[1]
+            weights_in_channels = dataset.graphs[0].patches[0].ndata["aggregated_weights"].shape[1]
+            epochs = 55
 
-        # GAT params
-        network_parameters["SP"]["residual"] = True  # bool
-        network_parameters["SP"]["exp_heads"] = False  # bool
+            network_parameters = {}
 
-        # Node Weigher params
-        network_parameters["SP"]["weigher_mode"] = "attn_weights+feats"  # [ "sp_weights", "attn_weights",  "attn_weights+feats" , None ]
+            ####  SPIDER PATCH PARAMETERS  ####
+            network_parameters["SP"] = {}
+            network_parameters["SP"]["module"] = GATSPEmbedder  # [ CONVSPEmbedder, GATSPEmbedder , GATWeightedSP, SPReader]
+            network_parameters["SP"]["readout_function"] = "AR"  # [ "AR" , "UR", "SR"]
+            network_parameters["SP"]["jumping_mode"] = "cat"  # [ None, "lstm", "max", "cat"]
+            network_parameters["SP"]["layers_num"] = 4
+            network_parameters["SP"]["dropout"] = 0
 
-        ####  MESH GRAPH PARAMETERS  ####
-        network_parameters["MG"] = {}
-        network_parameters["MG"]["module"] = GATMGEmbedder  # [ CONVMGEmbedder, GATMGEmbedder]
-        network_parameters["MG"]["readout_function"] = "AR"  # [ "AR" , "UR" ]
-        network_parameters["MG"]["jumping_mode"] = "cat"  # [ None, "lstm", "max", "cat"]
-        network_parameters["MG"]["layers_num"] = 2
-        network_parameters["MG"]["dropout"] = 0
-        network_parameters["MG"]["SP_batch_size"] = 512
+            # GAT params
+            network_parameters["SP"]["residual"] = True  # bool
+            network_parameters["SP"]["exp_heads"] = False  # bool
 
-        # GAT params
-        network_parameters["MG"]["residual"] = True  # bool
-        network_parameters["MG"]["exp_heads"] = False  # bool
+            # Node Weigher params
+            network_parameters["SP"]["weigher_mode"] = "attn_weights+feats"  # [ "sp_weights", "attn_weights",  "attn_weights+feats" , None ]
 
-        for structure in ["MG", "SP"]:
-            for key, value in network_parameters[structure].items():
-                experiment_dict[f"{structure}_{key}"] = [value if not inspect.isclass(value) else value.__name__]
+            ####  MESH GRAPH PARAMETERS  ####
+            network_parameters["MG"] = {}
+            network_parameters["MG"]["module"] = GATMGEmbedder  # [ CONVMGEmbedder, GATMGEmbedder]
+            network_parameters["MG"]["readout_function"] = "AR"  # [ "AR" , "UR" ]
+            network_parameters["MG"]["jumping_mode"] = "cat"  # [ None, "lstm", "max", "cat"]
+            network_parameters["MG"]["layers_num"] = 3
+            network_parameters["MG"]["dropout"] = 0
+            network_parameters["MG"]["SP_batch_size"] = 512
 
-        model = TestNetwork(feat_in_channels, weights_in_channels, class_num, network_parameters=network_parameters, use_SP_triplet=False)
-        model.to(device)
+            # GAT params
+            network_parameters["MG"]["residual"] = True  # bool
+            network_parameters["MG"]["exp_heads"] = False  # bool
 
-        #### TRAINING PARAMETERS  ####
-        experiment_dict["MG_batch_size"] = 128
-        experiment_dict["criterion"] = CETripletMG  # [nn.CrossEntropyLoss, TripletMG, CETripletMG]
-        # trainCVNetwork(model, dataset, fold, train_mask, test_mask, device, experiment_dict, epochs)
-        trainNetwork(model, dataset, train_mask, test_mask, device, experiment_dict, epochs)
+            for structure in ["MG", "SP"]:
+                for key, value in network_parameters[structure].items():
+                    experiment_dict[f"{structure}_{key}"] = [value if not inspect.isclass(value) else value.__name__]
+
+            model = TestNetwork(feat_in_channels, weights_in_channels, class_num, network_parameters=network_parameters, use_SP_triplet=False, sp_nodes=(rings * points) + 1)
+            model.to(device)
+
+            #### TRAINING PARAMETERS  ####
+            experiment_dict["MG_batch_size"] = 128
+            experiment_dict["criterion"] = CETripletMG  # [nn.CrossEntropyLoss, TripletMG, CETripletMG]
+            trainCVNetwork(model, dataset, fold, train_mask, test_mask, device, experiment_dict, epochs)
+            # trainNetwork(model, dataset, train_mask, test_mask, device, experiment_dict, epochs)
 
 
 def trainCVNetwork(model, dataset, fold_id, train_mask, test_mask, device, experiment_dict, epochs=1000, optimizer_option="all"):
-    rng = np.random.default_rng(717)
-
     # Added to not use 100% of CPU during the calculus of SpiderPatch embeddings in the network (The copy of a tensor is made in parallel in pytorch)
-    torch.set_num_threads(4)
+    torch.set_num_threads(6)
 
     RESULTS_TABLE_PATH = "../TrainingResults"
     RESULTS_TABLE_NAME = "CrossValTable"
@@ -170,6 +171,27 @@ def trainCVNetwork(model, dataset, fold_id, train_mask, test_mask, device, exper
     RESULTS_SAVE_PATH = "../TrainingResults/CrossValExperiments"
 
     EXPERIMENT_NAME = experiment_dict["dataset_name"][0] + f"_CVFOLD{fold_id}"
+
+    train(RESULTS_TABLE_PATH, RESULTS_TABLE_NAME, RESULTS_TABLE_BACKUP, RESULTS_SAVE_PATH, EXPERIMENT_NAME, model, dataset, train_mask, test_mask, device, experiment_dict, epochs, optimizer_option)
+
+
+def trainNetwork(model, dataset, train_mask, test_mask, device, experiment_dict, epochs=1000, optimizer_option="all"):
+    # Added to not use 100% of CPU during the calculus of SpiderPatch embeddings in the network (The copy of a tensor is made in parallel in pytorch)
+    torch.set_num_threads(6)
+
+    RESULTS_TABLE_PATH = "../TrainingResults"
+    RESULTS_TABLE_NAME = "ExperimentsTable"
+    RESULTS_TABLE_BACKUP = "../TrainingResults/TableBackups"
+    RESULTS_SAVE_PATH = "../TrainingResults/Experiments"
+
+    EXPERIMENT_NAME = datetime.now().strftime('%d%m%Y-%H%M%S')
+
+    train(RESULTS_TABLE_PATH, RESULTS_TABLE_NAME, RESULTS_TABLE_BACKUP, RESULTS_SAVE_PATH, EXPERIMENT_NAME, model, dataset, train_mask, test_mask, device, experiment_dict, epochs, optimizer_option)
+
+
+def train(RESULTS_TABLE_PATH, RESULTS_TABLE_NAME, RESULTS_TABLE_BACKUP, RESULTS_SAVE_PATH, EXPERIMENT_NAME, model, dataset, train_mask, test_mask, device, experiment_dict, epochs=1000, optimizer_option="all"):
+    rng = np.random.default_rng(717)
+    summary_writer = SummaryWriter(log_dir=f"{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/tensorboard")
 
     if os.path.exists(f"{RESULTS_TABLE_PATH}/{RESULTS_TABLE_NAME}.csv"):
         os.makedirs(f"{RESULTS_TABLE_BACKUP}", exist_ok=True)
@@ -183,9 +205,6 @@ def trainCVNetwork(model, dataset, fold_id, train_mask, test_mask, device, exper
 
     BATCH_SIZE = experiment_dict["MG_batch_size"]
     CRITERION = experiment_dict["criterion"]()
-
-    # scheduler = MultiStepLR(optimizer, milestones=[int(epochs * 0.40), int(epochs * 0.85), int(epochs * 0.95)], gamma=0.1)
-    # scheduler = ReduceLROnPlateau(optimizer, patience=5, factor=0.5, threshold=0.01)
 
     if optimizer_option == "all":
         optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
@@ -206,6 +225,10 @@ def trainCVNetwork(model, dataset, fold_id, train_mask, test_mask, device, exper
     else:
         raise ()
 
+    # scheduler = MultiStepLR(optimizer, milestones=[int(epochs * 0.40), int(epochs * 0.85), int(epochs * 0.95)], gamma=0.1)
+    # scheduler = ReduceLROnPlateau(optimizer, patience=5, factor=0.5, threshold=0.01)
+    # scheduler = CosineAnnealingWarmRestarts(optimizer, 10, T_mult=1, eta_min=0, last_epoch=- 1, verbose=True)
+
     start = time()
     train_losses = []
     val_accuracies = []
@@ -219,19 +242,19 @@ def trainCVNetwork(model, dataset, fold_id, train_mask, test_mask, device, exper
         batch_time = AverageMeter('Time', ':6.3f')
 
         if isinstance(CRITERION, TripletMGSP):
-            loss_meters = None  # TODO implementare
+            train_meters = None  # TODO implementare
         elif isinstance(CRITERION, CETripletMG):
-            loss_meters = [AverageMeter('CE+TRI_Loss', ':.6f'), AverageMeter('CE_Loss', ':.6f'), AverageMeter('MGTRI_Loss', ':.6f')]
+            train_meters = [AverageMeter('CE+TRI_Loss', ':.6f'), AverageMeter('CE_Loss', ':.6f'), AverageMeter('MGTRI_Loss', ':.6f')]
         elif isinstance(CRITERION, TripletMG):
-            loss_meters = [AverageMeter('TRI_Loss', ':.6f')]
+            train_meters = [AverageMeter('TRI_Loss', ':.6f')]
         else:
-            loss_meters = [AverageMeter('CE_Loss', ':.6f')]
+            train_meters = [AverageMeter('CE_Loss', ':.6f')]
 
         top1 = AverageMeter('Acc@1', ':6.2f')
         top3 = AverageMeter('Acc@3', ':6.2f')
         progress = ProgressMeter(
             len(dataloader),
-            [batch_time] + loss_meters + [top1, top3],
+            [batch_time] + train_meters + [top1, top3],
             prefix='Training: ')
 
         end = time()
@@ -263,8 +286,8 @@ def trainCVNetwork(model, dataset, fold_id, train_mask, test_mask, device, exper
                 batch_loss = [CRITERION(pred_class, labels)]
 
             acc1, acc3 = accuracy(pred_class, labels, topk=(1, 3))
-            for idx, loss_meter in enumerate(loss_meters):
-                loss_meter.update(batch_loss[idx].item(), batched_MG.batch_size)
+            for idx, train_meter in enumerate(train_meters):
+                train_meter.update(batch_loss[idx].item(), batched_MG.batch_size)
             top1.update(acc1.item(), batched_MG.batch_size)
             top3.update(acc3.item(), batched_MG.batch_size)
 
@@ -279,54 +302,60 @@ def trainCVNetwork(model, dataset, fold_id, train_mask, test_mask, device, exper
                 tqdm.write(progress.get_string(sampler))
 
         # plot_grad_flow(model.named_parameters())
-        train_losses.append(loss_meters[0].avg)
+
+        train_losses.append(train_meters[0].avg)
 
         experiment_dict["elapsed_epochs"] = epoch + 1
         experiment_dict["training_loss"] = train_losses[-1]
 
-        to_write = f"Epoch {epoch + 1}/{epochs} ({int(time() - start)}s) -->"
-        for loss_meter in loss_meters:
-            to_write += f"{loss_meter.name}: {loss_meter.avg:.3f}\t"
-        tqdm.write(to_write)
+        to_write = bcolors.BOLD + f"Epoch {epoch + 1}/{epochs} completed in ({int(time() - start)}s) -->   "
+        losses_summary = {}
+        for i, train_meter in enumerate(progress.meters):
+            to_write += f"{train_meter.name}: {train_meter.avg:.3f}    "
+            if "Loss" in train_meter.name:
+                losses_summary[train_meter.name] = train_meter.avg
+            summary_writer.add_scalar(f"Train/0{i}_{train_meter.name}", train_meter.avg, epoch)
+
+        tqdm.write(to_write + bcolors.ENDC)
+        summary_writer.add_scalars("Train/SummaryLoss", losses_summary, epoch)
 
         mesh_graph_classification_statistics = testNetwork(model=model, dataset=dataset, test_mask=test_mask, criterion=CRITERION, batch_size=BATCH_SIZE, device=device)
-        test_acc1, test_acc3, test_losses, cm = mesh_graph_classification_statistics
+        test_meters, cm = mesh_graph_classification_statistics
 
-        val_accuracies.append(test_acc1)
-        val_losses.append(test_losses[0].avg)
+        val_accuracies.append(test_meters["Acc@1"].avg)
+        val_losses.append(test_meters[train_meters[0].name].avg)
 
-        to_write = f"Validation Test\nMesh Graph Acc. : {test_acc1}"
-        for loss_meter in test_losses:
-            to_write += f"   {loss_meter.name}: {loss_meter.avg:.3f}"
+        to_write = bcolors.OKGREEN + f"Validation Test -->"
+        losses_summary = {}
+        for i, (name, test_meter) in enumerate(test_meters.items()):
+            to_write += f"{test_meter.name}: {test_meter.avg:.3f}    "
+            if "Loss" in test_meter.name:
+                losses_summary[test_meter.name] = test_meter.avg
+            summary_writer.add_scalar(f"Val/0{i}_{test_meter.name}", test_meter.avg, epoch)
+        summary_writer.add_scalars("Val/SummaryLoss", losses_summary, epoch)
+        to_write += bcolors.ENDC + "\n"
         tqdm.write(to_write)
 
-        if test_acc1 > best_acc:
-            best_acc = test_acc1
+        if test_meters["Acc@1"].avg > best_acc:
+            best_acc = test_meters["Acc@1"].avg
             experiment_dict["best_val_acc"] = best_acc
             experiment_dict["best_val_acc_epoch"] = epoch
             model.save(f'{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestAcc')
             save_confusion_matrix(cm[0], f'{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestAcc', "MeshGraphConfusionMatrix.png")
             save_confusion_matrix(cm[1], f'{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestAcc', "MeshGraphConfusionMatrixAbs.png")
-            with open(f'{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestAcc/MeshGraphConfusionMatrices.pkl', 'wb') as f:
-                pickle.dump(cm, f)
 
-            with open(f'{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestAcc/bestAcc.txt', 'w') as f:
-                f.write(f'Epoch:{epoch}\n' + to_write)
-
-        if test_losses[0].avg < best_loss:
-            best_loss = test_losses[0].avg
+        if test_meters[train_meters[0].name].avg < best_loss:
+            best_loss = test_meters[train_meters[0].name].avg
             experiment_dict["best_val_loss"] = best_loss
             experiment_dict["best_val_loss_epoch"] = epoch
             model.save(f"{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestLoss")
             save_confusion_matrix(cm[0], f"{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestLoss", "MeshGraphConfusionMatrix.png")
             save_confusion_matrix(cm[1], f"{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestLoss", "MeshGraphConfusionMatrixAbs.png")
-            with open(f'{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestLoss/MeshGraphConfusionMatrices.pkl', 'wb') as f:
-                pickle.dump(cm, f)
-            with open(f"{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestLoss/bestLoss.txt", 'w') as f:
-                f.write(f'Epoch:{epoch}\n' + to_write)
 
         # scheduler.step(loss)
         # scheduler.step()
+        # scheduler.step(epoch)
+
         plot_training_statistics(f"{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}", f"Train_MeshGraph_statistics.png", title=f"Best Acc: {np.trunc(best_acc) / 100}, Loss: {best_loss}", epochs=range(epoch + 1), losses=train_losses, val_epochs=range(epoch + 1), val_accuracies=np.array(val_accuracies) / 100,
                                  val_losses=val_losses)
 
@@ -342,192 +371,10 @@ def trainCVNetwork(model, dataset, fold_id, train_mask, test_mask, device, exper
         results_df.to_excel(f"{RESULTS_TABLE_PATH}/{RESULTS_TABLE_NAME}.xlsx", index=True)
 
 
-def trainNetwork(model, dataset, train_mask, test_mask, device, experiment_dict, epochs=1000, optimizer_option="all"):
-    rng = np.random.default_rng(717)
-
-    # Added to not use 100% of CPU during the calculus of SpiderPatch embeddings in the network (The copy of a tensor is made in parallel in pytorch)
-    torch.set_num_threads(4)
-
-    RESULTS_TABLE_PATH = "../TrainingResults"
-    RESULTS_TABLE_NAME = "ExperimentsTable"
-    RESULTS_TABLE_BACKUP = "../TrainingResults/TableBackups"
-    RESULTS_SAVE_PATH = "../TrainingResults/Experiments"
-
-    EXPERIMENT_NAME = datetime.now().strftime('%d%m%Y-%H%M%S')
-
-    # EXPERIMENT_NAME = datetime.now().strftime('%d%m%Y-%H%M%S')
-
-    if os.path.exists(f"{RESULTS_TABLE_PATH}/{RESULTS_TABLE_NAME}.csv"):
-        os.makedirs(f"{RESULTS_TABLE_BACKUP}", exist_ok=True)
-        shutil.copy2(f"{RESULTS_TABLE_PATH}/{RESULTS_TABLE_NAME}.csv", f"{RESULTS_TABLE_BACKUP}/TableBackup{EXPERIMENT_NAME}.csv")
-        results_df = pd.read_csv(f"{RESULTS_TABLE_PATH}/{RESULTS_TABLE_NAME}.csv", index_col=0)
-    else:
-        results_df = pd.DataFrame()
-
-    best_acc = 0
-    best_loss = 1000
-
-    BATCH_SIZE = experiment_dict["MG_batch_size"]
-    CRITERION = experiment_dict["criterion"]()
-
-    # scheduler = MultiStepLR(optimizer, milestones=[int(epochs * 0.40), int(epochs * 0.85), int(epochs * 0.95)], gamma=0.1)
-    # scheduler = ReduceLROnPlateau(optimizer, patience=5, factor=0.5, threshold=0.01)
-
-    if optimizer_option == "all":
-        optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
-
-    elif optimizer_option == "patch":
-        for param in model.parameters():
-            param.requires_grad = False
-        for param in model.patch_embedder.parameters():
-            param.requires_grad = True
-        optimizer = torch.optim.AdamW(model.patch_embedder.parameters())
-
-    elif optimizer_option == "mesh":
-        for param in model.parameters():
-            param.requires_grad = False
-        for param in model.mesh_embedder.parameters():
-            param.requires_grad = True
-        optimizer = torch.optim.AdamW(model.mesh_embedder.parameters())
-    else:
-        raise ()
-
-    start = time()
-    train_losses = []
-    val_accuracies = []
-    val_losses = []
-
-    for epoch in range(epochs):
-        model.train()
-        rng.shuffle(train_mask)
-        dataloader = GraphDataLoader(dataset[train_mask], batch_size=BATCH_SIZE, drop_last=False, shuffle=False)
-
-        batch_time = AverageMeter('Time', ':6.3f')
-
-        if isinstance(CRITERION, TripletMGSP):
-            loss_meters = None  # TODO implementare
-        elif isinstance(CRITERION, CETripletMG):
-            loss_meters = [AverageMeter('CE+TRI_Loss', ':.6f'), AverageMeter('CE_Loss', ':.6f'), AverageMeter('MGTRI_Loss', ':.6f')]
-        elif isinstance(CRITERION, TripletMG):
-            loss_meters = [AverageMeter('TRI_Loss', ':.6f')]
-        else:
-            loss_meters = [AverageMeter('CE_Loss', ':.6f')]
-
-        top1 = AverageMeter('Acc@1', ':6.2f')
-        top3 = AverageMeter('Acc@3', ':6.2f')
-        progress = ProgressMeter(
-            len(dataloader),
-            [batch_time] + loss_meters + [top1, top3],
-            prefix='Training: ')
-
-        end = time()
-
-        for sampler, (batched_MG, labels) in enumerate(tqdm(dataloader, position=0, leave=False, desc=f"Epoch {epoch + 1}: ", colour="white", ncols=80)):
-
-            # To GPU memory
-            batched_MG = batched_MG.to(device)
-            labels = labels.to(device)
-
-            # Prepare the batched SpiderPatches
-            SP_sampler = np.arange((sampler * BATCH_SIZE), (sampler * BATCH_SIZE) + len(labels))
-            spider_patches = [sp.to(device) for idx in SP_sampler for sp in dataset.graphs[train_mask][idx].patches]
-
-            # Optimization step
-            optimizer.zero_grad()
-
-            if isinstance(CRITERION, TripletMGSP):
-                pred_class, MG_embedding, SP_embeddings, SP_positive, SP_negative = model(batched_MG, spider_patches, device)
-                batch_loss = CRITERION(pred_class, labels, MG_embedding, SP_embeddings, SP_positive, SP_negative)
-            elif isinstance(CRITERION, CETripletMG):
-                pred_class, MG_embedding = model(batched_MG, spider_patches, device)
-                batch_loss = CRITERION(pred_class, labels, MG_embedding)
-            elif isinstance(CRITERION, TripletMG):
-                pred_class, MG_embedding = model(batched_MG, spider_patches, device)
-                batch_loss = [CRITERION(labels, MG_embedding)]
-            else:
-                pred_class, _ = model(batched_MG, spider_patches, device)
-                batch_loss = [CRITERION(pred_class, labels)]
-
-            acc1, acc3 = accuracy(pred_class, labels, topk=(1, 3))
-            for idx, loss_meter in enumerate(loss_meters):
-                loss_meter.update(batch_loss[idx].item(), batched_MG.batch_size)
-            top1.update(acc1.item(), batched_MG.batch_size)
-            top3.update(acc3.item(), batched_MG.batch_size)
-
-            batch_loss[0].backward()
-            optimizer.step()
-
-            # measure elapsed time
-            batch_time.update(time() - end)
-            end = time()
-
-            if sampler % 10 == 0:
-                tqdm.write(progress.get_string(sampler))
-
-        plot_grad_flow(model.named_parameters())
-        train_losses.append(loss_meters[0].avg)
-
-        experiment_dict["elapsed_epochs"] = epoch + 1
-        experiment_dict["training_loss"] = train_losses[-1]
-
-        to_write = f"Epoch {epoch + 1}/{epochs} ({int(time() - start)}s) -->"
-        for loss_meter in loss_meters:
-            to_write += f"{loss_meter.name}: {loss_meter.avg:.3f}\t"
-        tqdm.write(to_write)
-
-        mesh_graph_classification_statistics = testNetwork(model=model, dataset=dataset, test_mask=test_mask, criterion=CRITERION, batch_size=BATCH_SIZE, device=device)
-        test_acc1, test_acc3, test_losses, cm = mesh_graph_classification_statistics
-
-        val_accuracies.append(test_acc1)
-        val_losses.append(test_losses[0].avg)
-
-        to_write = f"Validation Test\nMesh Graph Acc. : {test_acc1}"
-        for loss_meter in test_losses:
-            to_write += f"   {loss_meter.name}: {loss_meter.avg:.3f}"
-        tqdm.write(to_write)
-
-        if test_acc1 > best_acc:
-            best_acc = test_acc1
-            experiment_dict["best_val_acc"] = best_acc
-            experiment_dict["best_val_acc_epoch"] = epoch
-            model.save(f'{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestAcc')
-            save_confusion_matrix(cm[0], f'{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestAcc', "MeshGraphConfusionMatrix.png")
-            save_confusion_matrix(cm[1], f'{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestAcc', "MeshGraphConfusionMatrixAbs.png")
-
-        with open(f'{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestAcc/bestAcc.txt', 'w') as f:
-            f.write(f'Epoch:{epoch}\n' + to_write)
-
-        if test_losses[0].avg < best_loss:
-            best_loss = test_losses[0].avg
-            experiment_dict["best_val_loss"] = best_loss
-            experiment_dict["best_val_loss_epoch"] = epoch
-            model.save(f"{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestLoss")
-            save_confusion_matrix(cm[0], f"{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestLoss", "MeshGraphConfusionMatrix.png")
-            save_confusion_matrix(cm[1], f"{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestLoss", "MeshGraphConfusionMatrixAbs.png")
-        with open(f"{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}/MeshNetworkBestLoss/bestLoss.txt", 'w') as f:
-            f.write(f'Epoch:{epoch}\n' + to_write)
-
-        # scheduler.step(loss)
-        # scheduler.step()
-        plot_training_statistics(f"{RESULTS_SAVE_PATH}/{EXPERIMENT_NAME}", f"Train_MeshGraph_statistics.png", title=f"Best Acc: {np.trunc(best_acc) / 100}, Loss: {best_loss}", epochs=range(epoch + 1), losses=train_losses, val_epochs=range(epoch + 1), val_accuracies=np.array(val_accuracies) / 100,
-                                 val_losses=val_losses)
-
-        df = pd.DataFrame.from_dict(experiment_dict)
-        df.index = [EXPERIMENT_NAME]
-
-        if epoch == 0:
-            results_df = pd.concat([results_df, df])
-        else:
-            results_df.loc[EXPERIMENT_NAME] = df.loc[EXPERIMENT_NAME]
-
-        results_df.to_csv(f"{RESULTS_TABLE_PATH}/{RESULTS_TABLE_NAME}.csv", index=True)
-        results_df.to_excel(f"{RESULTS_TABLE_PATH}/{RESULTS_TABLE_NAME}.xlsx", index=True)
-
-
 def testNetwork(model, dataset, test_mask, criterion, batch_size, device):
     model.eval()
     predicted_labels = np.empty(0)
-    loss_confidences = np.empty((0, dataset.numClasses()))
+    loss_confidences = np.empty((0, 15))
     dataloader = GraphDataLoader(dataset[test_mask], batch_size=batch_size, drop_last=False, shuffle=False)
 
     if isinstance(criterion, TripletMGSP):
@@ -576,10 +423,14 @@ def testNetwork(model, dataset, test_mask, criterion, batch_size, device):
             predicted_labels = np.hstack((predicted_labels, pred.argmax(dim=1)))  # Take the highest value in the predicted classes vector
             loss_confidences = np.vstack((loss_confidences, pred.detach().numpy()))
 
-    confusion_matrices = [metrics.confusion_matrix(dataset.labels[test_mask], predicted_labels.tolist(), normalize="true"), metrics.confusion_matrix(dataset.labels[test_mask], predicted_labels.tolist(), normalize=None)]
-    graph_statistics = (top1.avg, top3.avg, loss_meters, confusion_matrices)
+    confusion_matrices = [metrics.confusion_matrix(dataset.labels[test_mask], predicted_labels.tolist(), normalize="true"),
+                          metrics.confusion_matrix(dataset.labels[test_mask], predicted_labels.tolist(), normalize=None)]
     model.train()
-    return graph_statistics
+    test_metrics = {}
+    for meter in [top1, top3] + loss_meters:
+        test_metrics[meter.name] = meter
+
+    return test_metrics, confusion_matrices
 
 
 # def trainBLOCKMeshNetwork(model, dataset, train_mask, test_mask, block_size, device, epochs=1000, train_name="", debug=True, optimizer_option="all"):
@@ -854,6 +705,16 @@ def testNetwork(model, dataset, test_mask, criterion, batch_size, device):
 #                                  val_losses=val_losses)
 #         plot_training_statistics(f"{PATH}", f"Train_Mesh_statistics.png", title=f"Best Acc: {best_mesh_acc}", epochs=range(epoch + 1), losses=train_losses, val_accuracies=np.array(mesh_val_accuracies) / 100, val_epochs=range(epoch + 1))
 #
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
 
 
 if __name__ == "__main__":

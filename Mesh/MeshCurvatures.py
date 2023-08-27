@@ -37,7 +37,7 @@ def principalArbitraryCurvatures(mesh, radius):
     pca = PCA(n_components=3)
     vertexLD = np.full(shape=len(mesh.vertices), fill_value=np.nan)
 
-    for i in tqdm(range(0, vertex_number), position=0, leave=False, desc=f"Calculated vertices: ", colour="white", ncols=80):
+    for i in range(0, vertex_number):  # tqdm(range(0, vertex_number), position=0, leave=False, desc=f"Calculated vertices: ", colour="white", ncols=80):
         rot, invRot = VectorRotationMatrix(vertex_normals[i])
         seed_point = mesh.vertices[i]
         neigh_vertices = np.where(pairwise_distances(mesh.vertices, seed_point.reshape((1, -1)), metric="sqeuclidean") < radius)[0]
